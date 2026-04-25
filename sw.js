@@ -17,21 +17,18 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  // Network-first for all same-origin app files — always get latest version
-  if (url.origin === self.location.origin) {
-    e.respondWith(
-      fetch(e.request)
-        .then(res => {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
-          return res;
-        })
-        .catch(() => caches.match(e.request))
-    );
-    return;
-  }
-  // Network-first for external API calls
+  // Only handle same-origin app shell requests. Cross-origin (Polygon, FRED,
+  // GNews, GitHub, Fugle, CORS proxies) goes straight to the network so the
+  // browser handles CORS / rate-limit errors directly without polluting the
+  // console with SW "Failed to fetch" rejections.
+  if (url.origin !== self.location.origin) return;
   e.respondWith(
-    fetch(e.request).catch(() => caches.match(e.request))
+    fetch(e.request)
+      .then(res => {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then(c => c.put(e.request, clone)).catch(() => {});
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });

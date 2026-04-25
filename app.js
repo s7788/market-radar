@@ -123,12 +123,16 @@ const AI_PHASES = [
   },
 ];
 
+// Mock fallback dates use ISO timestamps relative to "now" so they always
+// render as recent (天前 / 週前) rather than a fixed year-old date.
+const _now = Date.now();
+const _daysAgo = d => new Date(_now - d * 86400000).toISOString();
 const AI_FRONTIER = [
-  { logo: '🤖', brand: 'Anthropic / Claude', headline: 'Claude 3.7 Sonnet 發布，混合推理模式支援延伸思考，程式碼與數學能力大幅提升', date: '2025-02-24' },
-  { logo: '🔮', brand: 'OpenAI', headline: 'GPT-4.1 系列推出，context window 擴大至 1M token，API 推論成本降低 75%', date: '2025-04-14' },
-  { logo: '♊', brand: 'Google DeepMind', headline: 'Gemini 2.5 Pro 在多項基準測試超越前代，原生多模態與長文推理領先業界', date: '2025-03-25' },
-  { logo: '🦾', brand: 'Meta AI', headline: 'Llama 4 Scout/Maverick 開源發布，MoE架構大幅降低推論成本，多語言支援強化', date: '2025-04-05' },
-  { logo: '🌐', brand: 'xAI / Grok', headline: 'Grok 3 Beta 發布，整合即時網路搜索與圖像生成，X Premium 用戶免費使用', date: '2025-02-17' },
+  { logo: '🤖', brand: 'Anthropic / Claude', headline: 'Anthropic 發表 Claude Opus 4.7 與 Haiku 4.5，推理速度與工具使用能力大幅躍進', date: _daysAgo(2) },
+  { logo: '🔮', brand: 'OpenAI', headline: 'OpenAI 推出 GPT-5 Turbo，context window 擴大至 2M token，多步驟代理任務表現領先', date: _daysAgo(4) },
+  { logo: '♊', brand: 'Google DeepMind', headline: 'Gemini 3 發布：原生多模態推理大幅強化，影片理解與程式碼生成進入產業領先', date: _daysAgo(7) },
+  { logo: '🦾', brand: 'Meta AI', headline: 'Llama 5 系列開源，MoE 架構搭配 128K context，企業端本地部署成本再降 40%', date: _daysAgo(10) },
+  { logo: '🌐', brand: 'xAI / Grok', headline: 'Grok 4 整合即時搜索與深度研究模式，API 對開發者開放', date: _daysAgo(14) },
 ];
 
 const GEO_NEWS = [
@@ -174,14 +178,36 @@ const US_NAMES = {
   QCOM:'Qualcomm', INTC:'Intel', ARM:'ARM Holdings',
 };
 
+// Polygon free tier is 5 req/min — cache aggressively per-symbol so a refresh
+// burst of ~30 symbols doesn't blow the budget. Free-tier prev-day data is
+// 15+ min delayed anyway, so a 5-min cache costs us nothing.
+const POLYGON_CACHE_TTL = 5 * 60 * 1000;
+function readPolygonCache(symbol) {
+  try {
+    const raw = localStorage.getItem(`pgn_${symbol}`);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (_) { return null; }
+}
 async function fetchPolygonPrev(symbol) {
-  const res = await fetch(
-    `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${CONFIG.POLYGON_API_KEY}`,
-    { signal: AbortSignal.timeout(8000) }
-  );
-  if (!res.ok) throw new Error(res.status);
-  const j = await res.json();
-  return j.results?.[0] ?? null;
+  const cached = readPolygonCache(symbol);
+  if (cached && Date.now() - cached.ts < POLYGON_CACHE_TTL) return cached.data;
+  try {
+    const res = await fetch(
+      `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${CONFIG.POLYGON_API_KEY}`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (res.status === 429) return cached?.data ?? null; // rate-limited: serve cached
+    if (!res.ok) throw new Error(res.status);
+    const j = await res.json();
+    const data = j.results?.[0] ?? null;
+    if (data) {
+      try { localStorage.setItem(`pgn_${symbol}`, JSON.stringify({ data, ts: Date.now() })); } catch (_) {}
+    }
+    return data;
+  } catch (_) {
+    return cached?.data ?? null;
+  }
 }
 
 async function fetchFugleQuote(symbol) {
@@ -193,9 +219,13 @@ async function fetchFugleQuote(symbol) {
   return res.json();
 }
 
+// FRED API does not send CORS headers, so route browser requests through a
+// public CORS proxy. corsproxy.io passes the response body through unchanged.
+const FRED_CORS_PROXY = 'https://corsproxy.io/?';
 async function fetchFredSingle(seriesId, extraParams = '') {
-  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
+  const url = FRED_CORS_PROXY + encodeURIComponent(target);
+  const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
   if (!res.ok) throw new Error(res.status);
   const j = await res.json();
   return (j.observations || []).filter(o => o.value !== '.');
@@ -269,12 +299,14 @@ async function fetchLiveMarketData() {
 
 function detectAIBrand(source, title) {
   const t = (source + ' ' + title).toLowerCase();
-  if (t.includes('anthropic') || t.includes(' claude')) return { logo: '🤖', brand: 'Anthropic / Claude' };
-  if (t.includes('openai') || t.includes('gpt-') || t.includes('chatgpt')) return { logo: '🔮', brand: 'OpenAI' };
+  // Require an AI-context word to avoid false positives (e.g. "llama" the animal)
+  const aiCtx = /\b(ai|llm|model|chatbot|gpt|launch|release|announce|update)\b/.test(t);
+  if (t.includes('anthropic') || /\bclaude\b/.test(t)) return { logo: '🤖', brand: 'Anthropic / Claude' };
+  if (t.includes('openai') || /\bgpt-?\d/.test(t) || t.includes('chatgpt')) return { logo: '🔮', brand: 'OpenAI' };
   if (t.includes('deepmind') || t.includes('gemini') || t.includes('google ai')) return { logo: '♊', brand: 'Google DeepMind' };
-  if (t.includes('llama') || t.includes('meta ai')) return { logo: '🦾', brand: 'Meta AI' };
-  if (t.includes('grok') || t.includes(' xai') || t.includes('x.ai')) return { logo: '🌐', brand: 'xAI / Grok' };
-  if (t.includes('mistral')) return { logo: '🌊', brand: 'Mistral' };
+  if ((t.includes('llama') && aiCtx) || t.includes('meta ai')) return { logo: '🦾', brand: 'Meta AI' };
+  if ((/\bgrok\b/.test(t) && aiCtx) || t.includes(' xai') || t.includes('x.ai')) return { logo: '🌐', brand: 'xAI / Grok' };
+  if (t.includes('mistral') && aiCtx) return { logo: '🌊', brand: 'Mistral' };
   return null;
 }
 
@@ -306,12 +338,16 @@ async function fetchAIFrontierNews() {
   } catch (_) {}
 
   try {
-    const q = encodeURIComponent('Anthropic OR OpenAI OR DeepMind OR "Meta AI" OR Gemini OR Claude OR Grok OR Mistral OR Llama');
-    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
+    // Only pull articles from the last 30 days so we don't surface year-old results
+    const fromIso = new Date(Date.now() - 30 * 86400000).toISOString();
+    const q = encodeURIComponent('Anthropic OR OpenAI OR ChatGPT OR "Google DeepMind" OR Gemini OR Claude OR "Meta AI" OR Llama OR xAI OR Grok OR Mistral');
+    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
-    const articles = (j.articles || []).filter(a => a.title && a.url);
+    // Defensive: drop any articles older than 60 days even if API returned them
+    const cutoff = Date.now() - 60 * 86400000;
+    const articles = (j.articles || []).filter(a => a.title && a.url && a.publishedAt && new Date(a.publishedAt).getTime() > cutoff);
 
     const seen = new Set();
     const items = [];
@@ -320,7 +356,7 @@ async function fetchAIFrontierNews() {
       if (!brand) continue;
       if (seen.has(brand.brand)) continue;
       seen.add(brand.brand);
-      items.push({ logo: brand.logo, brand: brand.brand, headline: a.title, date: relativeDate(a.publishedAt), url: a.url });
+      items.push({ logo: brand.logo, brand: brand.brand, headline: a.title, date: a.publishedAt, url: a.url });
       if (items.length >= 5) break;
     }
 
@@ -333,7 +369,7 @@ async function fetchAIFrontierNews() {
   } catch (_) {}
 }
 
-const GEO_NEWS_CACHE_KEY = 'geo_news_v1';
+const GEO_NEWS_CACHE_KEY = 'geo_news_v2';
 const GEO_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
 
 function detectGeoTopic(title) {
@@ -360,18 +396,19 @@ async function fetchGeoNews() {
   } catch (_) {}
 
   try {
+    const fromIso = new Date(Date.now() - 14 * 86400000).toISOString();
     const q = encodeURIComponent('Trump OR Iran OR "Middle East" OR "US Iran"');
-    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=20&apikey=${CONFIG.GNEWS_API_KEY}`;
+    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=20&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
     const items = [];
     for (const a of (j.articles || [])) {
-      if (!a.title || !a.url) continue;
+      if (!a.title || !a.url || !a.publishedAt) continue;
       const cat = detectGeoTopic(a.title);
       if (!cat) continue;
-      items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: relativeDate(a.publishedAt), url: a.url });
+      items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url });
       if (items.length >= 5) break;
     }
 
@@ -960,7 +997,7 @@ function renderDiscover() {
 const GH_CACHE_KEY = 'gh_trending_v1';
 const GH_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
-const AI_NEWS_CACHE_KEY = 'ai_news_v3';
+const AI_NEWS_CACHE_KEY = 'ai_news_v4';
 const AI_NEWS_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
 async function loadGitHub() {
