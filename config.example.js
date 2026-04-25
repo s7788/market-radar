@@ -21,10 +21,10 @@ const CONFIG = {
   // 申請：https://polygon.io/dashboard/signup → Free tier
   POLYGON_API_KEY: 'your_polygon_api_key_here',
 
-  // ── 財經新聞 (NewsAPI.org) ────────────────────────────────────────────
-  // 全球財經新聞彙整，免費方案有24小時延遲
-  // 申請：https://newsapi.org/register → Developer (free)
-  NEWS_API_KEY: 'your_newsapi_key_here',
+  // ── AI前沿消息 (GNews.io) ─────────────────────────────────────────────
+  // 支援瀏覽器端 CORS，免費方案 100 req/day，新聞即時無延遲
+  // 申請：https://gnews.io/ → 免費註冊取得 API Key
+  GNEWS_API_KEY: 'your_gnews_api_key_here',
 
   // ── 自選股清單 ────────────────────────────────────────────────────────
   // 修改這裡即可自訂追蹤的股票，無需動 app.js

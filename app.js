@@ -126,11 +126,11 @@ const AI_PHASES = [
 ];
 
 const AI_FRONTIER = [
-  { logo: '🤖', brand: 'Anthropic / Claude', headline: 'Claude 4 Opus 正式發布，推理能力超越 GPT-4o，支援 200K context window 與原生工具使用', date: '3天前' },
-  { logo: '🔮', brand: 'OpenAI', headline: 'o3 推理模型開放一般用戶，GPT-5 研發中，預計年底前推出多模態強化版本', date: '5天前' },
-  { logo: '♊', brand: 'Google DeepMind', headline: 'Gemini 2.5 Pro 在多項基準測試超越前代，Project Astra 實時視覺助理進入封測', date: '1週前' },
-  { logo: '🦾', brand: 'Meta AI', headline: 'Llama 4 Scout/Maverick 開源版本發布，MoE架構大幅降低推論成本', date: '1週前' },
-  { logo: '🌐', brand: 'xAI / Grok', headline: 'Grok 3 接入即時網路搜索，整合Tesla Dojo訓練資源，X平台免費開放', date: '2週前' },
+  { logo: '🤖', brand: 'Anthropic / Claude', headline: 'Claude 3.7 Sonnet 發布，混合推理模式支援延伸思考，程式碼與數學能力大幅提升', date: '2025-02-24' },
+  { logo: '🔮', brand: 'OpenAI', headline: 'GPT-4.1 系列推出，context window 擴大至 1M token，API 推論成本降低 75%', date: '2025-04-14' },
+  { logo: '♊', brand: 'Google DeepMind', headline: 'Gemini 2.5 Pro 在多項基準測試超越前代，原生多模態與長文推理領先業界', date: '2025-03-25' },
+  { logo: '🦾', brand: 'Meta AI', headline: 'Llama 4 Scout/Maverick 開源發布，MoE架構大幅降低推論成本，多語言支援強化', date: '2025-04-05' },
+  { logo: '🌐', brand: 'xAI / Grok', headline: 'Grok 3 Beta 發布，整合即時網路搜索與圖像生成，X Premium 用戶免費使用', date: '2025-02-17' },
 ];
 
 const TW_STOCKS_PE = [
@@ -280,11 +280,13 @@ function relativeDate(dateStr) {
   if (h < 1) return '剛剛';
   if (h < 24) return `${h}小時前`;
   if (d < 7) return `${d}天前`;
-  return `${Math.floor(d / 7)}週前`;
+  if (d < 30) return `${Math.floor(d / 7)}週前`;
+  if (d < 365) return `${Math.floor(d / 30)}個月前`;
+  return `${Math.floor(d / 365)}年前`;
 }
 
 async function fetchAIFrontierNews() {
-  if (!cfg('NEWS_API_KEY')) return;
+  if (!cfg('GNEWS_API_KEY')) return;
 
   try {
     const cached = localStorage.getItem(AI_NEWS_CACHE_KEY);
@@ -300,12 +302,12 @@ async function fetchAIFrontierNews() {
   } catch (_) {}
 
   try {
-    const q = encodeURIComponent('Anthropic OR OpenAI OR "Google DeepMind" OR "Meta AI" OR Gemini OR Claude OR Grok OR Mistral OR Llama');
-    const url = `https://newsapi.org/v2/everything?q=${q}&language=en&sortBy=publishedAt&pageSize=30&apiKey=${CONFIG.NEWS_API_KEY}`;
+    const q = encodeURIComponent('Anthropic OR OpenAI OR DeepMind OR "Meta AI" OR Gemini OR Claude OR Grok OR Mistral OR Llama');
+    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
-    const articles = (j.articles || []).filter(a => a.title && a.url && !a.title.includes('[Removed]'));
+    const articles = (j.articles || []).filter(a => a.title && a.url);
 
     const seen = new Set();
     const items = [];
@@ -483,7 +485,7 @@ function renderOverview() {
     LIVE_SOURCES.watchlist  && '自選股（Polygon.io / Fugle）',
     LIVE_SOURCES.market     && '指數 & 原物料（Polygon.io）',
     LIVE_SOURCES.fed        && '總經指標（FRED）',
-    LIVE_SOURCES.aiFrontier && 'AI前沿消息（NewsAPI）',
+    LIVE_SOURCES.aiFrontier && 'AI前沿消息（GNews）',
   ].filter(Boolean);
   const liveBanner = liveItems.length
     ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時資料：${liveItems.join('、')}</div>`
@@ -749,12 +751,13 @@ function renderAI() {
   const frontier = AI_FRONTIER.map(f => {
     const tag = f.url ? 'a' : 'div';
     const href = f.url ? ` href="${f.url}" target="_blank" rel="noopener"` : '';
+    const displayDate = /^\d{4}-\d{2}-\d{2}/.test(f.date) ? relativeDate(f.date) : f.date;
     return `<${tag} class="frontier-item"${href}>
       <div class="frontier-logo">${f.logo}</div>
       <div class="frontier-content">
         <div class="frontier-brand">${f.brand}</div>
         <div class="frontier-headline">${f.headline}</div>
-        <div class="frontier-date">${f.date}</div>
+        <div class="frontier-date">${displayDate}</div>
       </div>
     </${tag}>`;
   }).join('');
@@ -809,7 +812,7 @@ function renderDiscover() {
 const GH_CACHE_KEY = 'gh_trending_v1';
 const GH_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
-const AI_NEWS_CACHE_KEY = 'ai_news_v1';
+const AI_NEWS_CACHE_KEY = 'ai_news_v2';
 const AI_NEWS_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
 async function loadGitHub() {
