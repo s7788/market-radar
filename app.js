@@ -8,12 +8,10 @@ const INDICES = [
 ];
 
 const COMMODITIES = [
-  { name: 'WTI原油',    symbol: 'OIL',   price:  94.88,  unit: '$/桶',  change: -0.97, pct: -1.01, icon: '🛢️' },
-  { name: '黃金',       symbol: 'GOLD',  price: 4740.00, unit: '$/oz',  change: 16.21, pct:  0.34, icon: '🥇' },
-  { name: '美元指數',   symbol: 'DXY',   price:  98.36,  unit: '',      change: -0.24, pct: -0.24, icon: '💵' },
-  { name: '美元/日圓',  symbol: 'USDJPY',price: 159.30,  unit: '',      change: -0.32, pct: -0.20, icon: '¥' },
-  { name: 'VIX恐慌指數',symbol: 'VIX',   price:  18.71,  unit: '',      change: -0.60, pct: -3.11, icon: '📊' },
-  { name: '美元/台幣',   symbol: 'USDTWD',price:  31.48,  unit: '',      change: -0.12, pct: -0.38, icon: '🇹🇼' },
+  { name: '布蘭特原油', symbol: 'BRT',    price:  97.60,  unit: '$/桶', change:  1.12, pct:  1.16, icon: '🛢️' },
+  { name: '黃金期貨',   symbol: 'GC',     price: 4745.00, unit: '$/oz', change: 16.80, pct:  0.36, icon: '🥇' },
+  { name: 'VIX恐慌指數',symbol: 'VIX',    price:  18.71,  unit: '',     change: -0.60, pct: -3.11, icon: '📊' },
+  { name: '美元/台幣',   symbol: 'USDTWD', price:  31.48,  unit: '',     change: -0.12, pct: -0.38, icon: '🇹🇼' },
 ];
 
 const FED_DATA = {
@@ -133,6 +131,13 @@ const AI_FRONTIER = [
   { logo: '🌐', brand: 'xAI / Grok', headline: 'Grok 3 Beta 發布，整合即時網路搜索與圖像生成，X Premium 用戶免費使用', date: '2025-02-17' },
 ];
 
+const GEO_NEWS = [
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump announces 25% tariffs on all steel and aluminum imports, threatens secondary tariffs on nations not buying US energy', src: 'Reuters', date: '2026-04-23' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump calls on Fed to cut rates "immediately by at least 1 point", renews attacks on Powell over inflation policy', src: 'Bloomberg', date: '2026-04-22' },
+  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US-Iran nuclear talks in Geneva stall as Iran rejects uranium enrichment cap; US warns of consequences', src: 'AP', date: '2026-04-24' },
+  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US deploys second carrier strike group to Strait of Hormuz; Iran Revolutionary Guard declares high alert', src: 'FT', date: '2026-04-21' },
+];
+
 const TW_STOCKS_PE = [
   { rank: 1,  name: '台積電',  code: '2330', pe: 22.4, peLevel: 'mid', reason: '全球AI晶片製造龍頭，CoWoS持續擴產', sector: '半導體' },
   { rank: 2,  name: '聯發科',  code: '2454', pe: 16.8, peLevel: 'low', reason: '邊緣AI SoC市佔率提升，車用電子高成長', sector: 'IC設計' },
@@ -151,7 +156,7 @@ const ML_CLOCK_POSITION = 0.75; // 0-3 clock position (0=12點=Recovery起點)
 // ── Config Helpers ────────────────────────────────────────────────────────
 
 // Tracks which data sources are currently live (vs mock)
-const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false };
+const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false, geoNews: false };
 
 // Returns true only if the key exists in CONFIG and is not a placeholder
 function cfg(key) {
@@ -241,12 +246,10 @@ async function fetchLiveMarketData() {
       fetchPolygonPrev('I:SPX'   ).then(d => { applyOHLC(INDICES,     0, d); if (d) hits.push(1); }).catch(() => {}),
       fetchPolygonPrev('I:NDX'   ).then(d => { applyOHLC(INDICES,     1, d); if (d) hits.push(1); }).catch(() => {}),
       fetchPolygonPrev('I:DJI'   ).then(d => { applyOHLC(INDICES,     2, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('X:WTIUSD').then(d => { applyOHLC(COMMODITIES, 0, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('C:BRTUSD').then(d => { applyOHLC(COMMODITIES, 0, d); if (d) hits.push(1); }).catch(() => {}),
       fetchPolygonPrev('C:XAUUSD').then(d => { applyOHLC(COMMODITIES, 1, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('I:DXY'   ).then(d => { applyOHLC(COMMODITIES, 2, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('C:USDJPY').then(d => { applyOHLC(COMMODITIES, 3, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('I:VIX'   ).then(d => { applyOHLC(COMMODITIES, 4, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('C:USDTWD').then(d => { applyOHLC(COMMODITIES, 5, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('I:VIX'   ).then(d => { applyOHLC(COMMODITIES, 2, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('C:USDTWD').then(d => { applyOHLC(COMMODITIES, 3, d); if (d) hits.push(1); }).catch(() => {}),
     ]);
   }
 
@@ -329,6 +332,60 @@ async function fetchAIFrontierNews() {
   } catch (_) {}
 }
 
+const GEO_NEWS_CACHE_KEY = 'geo_news_v1';
+const GEO_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
+
+function detectGeoTopic(title) {
+  const t = title.toLowerCase();
+  if (t.includes('trump') || t.includes('donald')) return { topic: 'trump', icon: '🇺🇸', label: '川普言論' };
+  if (t.includes('iran') || t.includes('hormuz') || t.includes('tehran') || t.includes('nuclear deal') || t.includes('middle east')) return { topic: 'iran', icon: '⚔️', label: '美伊局勢' };
+  return null;
+}
+
+async function fetchGeoNews() {
+  if (!cfg('GNEWS_API_KEY')) return;
+
+  try {
+    const cached = localStorage.getItem(GEO_NEWS_CACHE_KEY);
+    if (cached) {
+      const { items, ts } = JSON.parse(cached);
+      if (Date.now() - ts < GEO_NEWS_CACHE_TTL) {
+        GEO_NEWS.length = 0;
+        GEO_NEWS.push(...items);
+        LIVE_SOURCES.geoNews = true;
+        return;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const q = encodeURIComponent('Trump OR Iran OR "Middle East" OR "US Iran"');
+    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=20&apikey=${CONFIG.GNEWS_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(res.status);
+    const j = await res.json();
+
+    const seen = { trump: 0, iran: 0 };
+    const items = [];
+    for (const a of (j.articles || [])) {
+      if (!a.title || !a.url) continue;
+      const cat = detectGeoTopic(a.title);
+      if (!cat) continue;
+      if (seen[cat.topic] >= 2) continue;
+      seen[cat.topic]++;
+      items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: relativeDate(a.publishedAt), url: a.url });
+      if (seen.trump >= 2 && seen.iran >= 2) break;
+    }
+
+    if (items.length) {
+      try { localStorage.setItem(GEO_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now() })); } catch (_) {}
+      GEO_NEWS.length = 0;
+      GEO_NEWS.push(...items);
+      LIVE_SOURCES.geoNews = true;
+    }
+  } catch (_) {}
+}
+
 async function fetchAndUpdateLiveData() {
   const tasks = [];
 
@@ -374,6 +431,7 @@ async function fetchAndUpdateLiveData() {
   tasks.push(fetchFredData());
   tasks.push(fetchLiveMarketData());
   tasks.push(fetchAIFrontierNews());
+  tasks.push(fetchGeoNews());
   await Promise.allSettled(tasks);
 }
 
@@ -425,6 +483,17 @@ function renderOverview() {
         <div class="commodity-change ${d.change >= 0 ? 'up' : 'down'}">${d.change >= 0 ? '+' : ''}${d.pct.toFixed(2)}%</div>
       </div>
     </div>`).join('');
+
+  const geoRows = GEO_NEWS.map(g => {
+    const tag = g.url ? 'a' : 'div';
+    const href = g.url ? ` href="${g.url}" target="_blank" rel="noopener"` : '';
+    const displayDate = /^\d{4}-\d{2}-\d{2}/.test(g.date) ? relativeDate(g.date) : g.date;
+    return `<${tag} class="news-item"${href}>
+      <div><span class="news-tag tag-${g.topic}">${g.icon} ${g.label}</span></div>
+      <div class="news-headline">${g.headline}</div>
+      <div class="news-meta">${g.src} · ${displayDate}</div>
+    </${tag}>`;
+  }).join('');
 
   const topNews = NEWS.slice(0, 4).map(n => `
     <div class="news-item">
@@ -486,6 +555,7 @@ function renderOverview() {
     LIVE_SOURCES.market     && '指數 & 原物料（Polygon.io）',
     LIVE_SOURCES.fed        && '總經指標（FRED）',
     LIVE_SOURCES.aiFrontier && 'AI前沿消息（GNews）',
+    LIVE_SOURCES.geoNews    && '地緣政治（GNews）',
   ].filter(Boolean);
   const liveBanner = liveItems.length
     ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時資料：${liveItems.join('、')}</div>`
@@ -505,6 +575,10 @@ function renderOverview() {
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--yellow)"></span>原物料 & 避險指標</div>
       ${commodities}
+    </div>
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--red)"></span>地緣政治 & 川普言論</div>
+      ${geoRows}
     </div>
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--green)"></span>今日快訊</div>

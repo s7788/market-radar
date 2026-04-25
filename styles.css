@@ -159,6 +159,8 @@ body {
 .tag-macro { background: var(--yellow-bg); color: var(--yellow); }
 .tag-ai { background: var(--purple-bg); color: var(--purple); }
 .tag-earnings { background: var(--orange-bg); color: var(--orange); }
+.tag-trump { background: var(--blue-bg); color: var(--blue); }
+.tag-iran  { background: var(--red-bg);  color: var(--red); }
 .news-headline { font-size: .88rem; font-weight: 600; line-height: 1.4; color: var(--text); }
 .news-meta { font-size: .7rem; color: var(--text-muted); margin-top: 4px; }
 
