@@ -1,4 +1,4 @@
-const CACHE_NAME = 'market-radar-v1';
+const CACHE_NAME = 'market-radar-v2';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/config.js', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', e => {
