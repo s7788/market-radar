@@ -1,0 +1,15 @@
+# API keys — never commit this file
+config.js
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Claude Code session files
+.claude/

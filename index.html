@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="每日市場雷達：股市、AI趨勢、美林時鐘、經濟週期">
+  <title>市場雷達</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header id="app-header">
+    <h1>市場<span>雷達</span></h1>
+    <div class="header-right">
+      <span id="last-updated"></span>
+      <button id="refresh-btn">↻ 更新</button>
+    </div>
+  </header>
+
+  <main id="tab-content"></main>
+
+  <nav id="bottom-nav"></nav>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

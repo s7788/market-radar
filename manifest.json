@@ -1,0 +1,21 @@
+{
+  "name": "市場雷達 Market Radar",
+  "short_name": "市場雷達",
+  "description": "每日市場概覽：股市、AI趨勢、經濟週期、美林時鐘",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0d1117",
+  "background_color": "#0d1117",
+  "lang": "zh-TW",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "news"]
+}
