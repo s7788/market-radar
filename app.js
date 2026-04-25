@@ -13,7 +13,20 @@ const COMMODITIES = [
   { name: '美元指數',   symbol: 'DXY',   price:  103.45, unit: '',      change:  0.23, pct:  0.22, icon: '💵' },
   { name: '美元/日圓',  symbol: 'USDJPY',price:  151.23, unit: '',      change:  0.45, pct:  0.30, icon: '¥' },
   { name: 'VIX恐慌指數',symbol: 'VIX',   price:   18.45, unit: '',      change: -1.23, pct: -6.25, icon: '📊' },
+  { name: '美元/台幣',   symbol: 'USDTWD',price:   32.15, unit: '',      change:  0.05, pct:  0.16, icon: '🇹🇼' },
 ];
+
+const FED_DATA = {
+  nextMeeting: { date: '6月17–18日', rateNow: '4.25–4.50%', rateExpected: '4.00–4.25%', cutProb: 72 },
+  indicators: [
+    { label: 'CPI 通膨率',  unit: '%',  current:  2.4,  prev:  2.8,  forecast:  2.3, forecastDate: '5月13日', better: 'down' },
+    { label: '核心 CPI',    unit: '%',  current:  2.8,  prev:  3.1,  forecast:  2.6, forecastDate: '5月13日', better: 'down' },
+    { label: 'PCE 通膨',    unit: '%',  current:  2.3,  prev:  2.5,  forecast:  2.2, forecastDate: '4月30日', better: 'down' },
+    { label: '失業率',      unit: '%',  current:  4.2,  prev:  4.1,  forecast:  4.3, forecastDate: '5月2日',  better: 'down' },
+    { label: 'GDP (QoQ)',   unit: '%',  current: -0.3,  prev:  2.4,  forecast:  0.8, forecastDate: 'Q2預測',  better: 'up'   },
+    { label: '非農就業',    unit: '萬', current: 17.7,  prev: 15.1,  forecast: 18.0, forecastDate: '5月2日',  better: 'up'   },
+  ],
+};
 
 const WATCHLIST = [
   { name: 'Apple',    symbol: 'AAPL', price:  195.67, change:  1.23, pct:  0.63, market: 'US' },
@@ -259,6 +272,52 @@ function renderOverview() {
       <div class="news-meta">${n.src} · ${n.time}</div>
     </div>`).join('');
 
+  const fedMtg = FED_DATA.nextMeeting;
+  const cutProbColor = fedMtg.cutProb >= 60 ? 'var(--green)' : fedMtg.cutProb >= 40 ? 'var(--yellow)' : 'var(--red)';
+  const fedRateBox = `
+    <div class="fed-rate-box">
+      <div class="fed-rate-col">
+        <div class="fed-rate-label">當前利率</div>
+        <div class="fed-rate-val">${fedMtg.rateNow}</div>
+      </div>
+      <div class="fed-rate-divider"></div>
+      <div class="fed-rate-col">
+        <div class="fed-rate-label">下次 FOMC</div>
+        <div class="fed-rate-val fed-rate-val-sm">${fedMtg.date}</div>
+        <div class="fed-rate-sub">預期 ${fedMtg.rateExpected}</div>
+      </div>
+      <div class="fed-rate-divider"></div>
+      <div class="fed-rate-col">
+        <div class="fed-rate-label">降息機率</div>
+        <div class="fed-rate-val" style="color:${cutProbColor}">${fedMtg.cutProb}%</div>
+        <div class="fed-rate-sub" style="color:${cutProbColor}">CME FedWatch</div>
+      </div>
+    </div>`;
+  const fedIndRows = FED_DATA.indicators.map(ind => {
+    const prevDiff = ind.current - ind.prev;
+    const prevArrow = prevDiff > 0 ? '▲' : prevDiff < 0 ? '▼' : '—';
+    const prevGood = (ind.better === 'down' && prevDiff <= 0) || (ind.better === 'up' && prevDiff >= 0);
+    const prevCls = prevGood ? 'up' : 'down';
+    const fcstDiff = ind.forecast - ind.current;
+    const fcstArrow = fcstDiff > 0 ? '▲' : fcstDiff < 0 ? '▼' : '—';
+    const fcstGood = (ind.better === 'down' && fcstDiff <= 0) || (ind.better === 'up' && fcstDiff >= 0);
+    const fcstCls = fcstGood ? 'up' : 'down';
+    const fmtAbs = v => v.toFixed(1) + ind.unit;
+    return `
+      <div class="fed-ind-row">
+        <div class="fed-ind-main">
+          <div class="fed-ind-name">${ind.label}</div>
+          <div class="fed-ind-current">${fmtAbs(ind.current)}</div>
+        </div>
+        <div class="fed-ind-sub">
+          <span class="${prevCls}">${prevArrow} 前值 ${fmtAbs(ind.prev)}</span>
+          <span class="fed-ind-sep">·</span>
+          <span class="${fcstCls}">預測 ${fcstArrow} ${fmtAbs(ind.forecast)}</span>
+          <span class="fed-ind-date">${ind.forecastDate}</span>
+        </div>
+      </div>`;
+  }).join('');
+
   return `
     ${LIVE_SOURCES.watchlist
       ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 自選股為即時報價（Polygon.io / Fugle）</div>`
@@ -266,6 +325,11 @@ function renderOverview() {
     <div class="card">
       <div class="card-title"><span class="dot"></span>主要指數</div>
       <div class="price-grid">${indices}</div>
+    </div>
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--blue)"></span>聯準會 & 總經指標</div>
+      ${fedRateBox}
+      ${fedIndRows}
     </div>
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--yellow)"></span>原物料 & 避險指標</div>
