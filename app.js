@@ -151,7 +151,7 @@ const ML_CLOCK_POSITION = 0.75; // 0-3 clock position (0=12點=Recovery起點)
 // ── Config Helpers ────────────────────────────────────────────────────────
 
 // Tracks which data sources are currently live (vs mock)
-const LIVE_SOURCES = { watchlist: false, fed: false };
+const LIVE_SOURCES = { watchlist: false, fed: false, market: false };
 
 // Returns true only if the key exists in CONFIG and is not a placeholder
 function cfg(key) {
@@ -225,6 +225,44 @@ async function fetchFredData() {
   } catch (_) {}
 }
 
+function applyOHLC(arr, idx, d) {
+  if (!d?.c) return;
+  const pct = d.o > 0 ? ((d.c - d.o) / d.o) * 100 : 0;
+  arr[idx].price  = d.c;
+  arr[idx].change = +(d.c - d.o).toFixed(2);
+  arr[idx].pct    = +pct.toFixed(2);
+}
+
+async function fetchLiveMarketData() {
+  const hits = [];
+
+  if (cfg('POLYGON_API_KEY')) {
+    await Promise.allSettled([
+      fetchPolygonPrev('I:SPX'   ).then(d => { applyOHLC(INDICES,     0, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('I:NDX'   ).then(d => { applyOHLC(INDICES,     1, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('I:DJI'   ).then(d => { applyOHLC(INDICES,     2, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('X:WTIUSD').then(d => { applyOHLC(COMMODITIES, 0, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('C:XAUUSD').then(d => { applyOHLC(COMMODITIES, 1, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('I:DXY'   ).then(d => { applyOHLC(COMMODITIES, 2, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('C:USDJPY').then(d => { applyOHLC(COMMODITIES, 3, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('I:VIX'   ).then(d => { applyOHLC(COMMODITIES, 4, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('C:USDTWD').then(d => { applyOHLC(COMMODITIES, 5, d); if (d) hits.push(1); }).catch(() => {}),
+    ]);
+  }
+
+  if (cfg('FUGLE_API_KEY')) {
+    await fetchFugleQuote('TWSE').then(d => {
+      if (!d) return;
+      INDICES[3].price  = d.closePrice ?? d.lastPrice ?? INDICES[3].price;
+      INDICES[3].change = d.change ?? INDICES[3].change;
+      INDICES[3].pct    = d.changePercent ?? INDICES[3].pct;
+      hits.push(1);
+    }).catch(() => {});
+  }
+
+  if (hits.length) LIVE_SOURCES.market = true;
+}
+
 async function fetchAndUpdateLiveData() {
   const tasks = [];
 
@@ -268,6 +306,7 @@ async function fetchAndUpdateLiveData() {
   }
 
   tasks.push(fetchFredData());
+  tasks.push(fetchLiveMarketData());
   await Promise.allSettled(tasks);
 }
 
@@ -377,7 +416,8 @@ function renderOverview() {
 
   const liveItems = [
     LIVE_SOURCES.watchlist && '自選股（Polygon.io / Fugle）',
-    LIVE_SOURCES.fed && '總經指標（FRED）',
+    LIVE_SOURCES.market    && '指數 & 原物料（Polygon.io）',
+    LIVE_SOURCES.fed       && '總經指標（FRED）',
   ].filter(Boolean);
   const liveBanner = liveItems.length
     ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時資料：${liveItems.join('、')}</div>`
@@ -783,7 +823,8 @@ async function refresh() {
   await fetchAndUpdateLiveData();
   switchTab(activeTab);
   btn.classList.remove('spinning');
-  document.getElementById('last-updated').textContent = `${LIVE_SOURCES.watchlist ? '即時' : '更新'}: ${now()}`;
+  const anyLive = LIVE_SOURCES.watchlist || LIVE_SOURCES.market || LIVE_SOURCES.fed;
+  document.getElementById('last-updated').textContent = `${anyLive ? '即時' : '更新'}: ${now()}`;
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────
@@ -815,7 +856,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 背景取得即時資料，完成後重繪當前分頁
   await fetchAndUpdateLiveData();
-  if (LIVE_SOURCES.watchlist) {
+  if (LIVE_SOURCES.watchlist || LIVE_SOURCES.market || LIVE_SOURCES.fed) {
     switchTab(activeTab);
     document.getElementById('last-updated').textContent = `即時: ${now()}`;
   }
