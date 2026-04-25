@@ -28,6 +28,22 @@ const FED_DATA = {
   ],
 };
 
+// FOMC 2026 會議行程（自動計算下次會議日期）
+const FOMC_2026 = [
+  { end: '2026-01-29', display: '1月28–29日' },
+  { end: '2026-03-19', display: '3月18–19日' },
+  { end: '2026-04-29', display: '4月28–29日' },
+  { end: '2026-06-18', display: '6月17–18日' },
+  { end: '2026-07-29', display: '7月28–29日' },
+  { end: '2026-09-17', display: '9月16–17日' },
+  { end: '2026-10-29', display: '10月28–29日' },
+  { end: '2026-12-10', display: '12月9–10日' },
+];
+function nextFOMC() {
+  const today = new Date().toISOString().slice(0, 10);
+  return FOMC_2026.find(m => m.end >= today) ?? FOMC_2026[FOMC_2026.length - 1];
+}
+
 const WATCHLIST = [
   { name: 'Apple',    symbol: 'AAPL', price:  195.67, change:  1.23, pct:  0.63, market: 'US' },
   { name: 'NVIDIA',   symbol: 'NVDA', price:  892.34, change: 15.67, pct:  1.79, market: 'US' },
@@ -135,7 +151,7 @@ const ML_CLOCK_POSITION = 0.75; // 0-3 clock position (0=12點=Recovery起點)
 // ── Config Helpers ────────────────────────────────────────────────────────
 
 // Tracks which data sources are currently live (vs mock)
-const LIVE_SOURCES = { watchlist: false };
+const LIVE_SOURCES = { watchlist: false, fed: false };
 
 // Returns true only if the key exists in CONFIG and is not a placeholder
 function cfg(key) {
@@ -169,6 +185,44 @@ async function fetchFugleQuote(symbol) {
   );
   if (!res.ok) throw new Error(res.status);
   return res.json();
+}
+
+async function fetchFredSingle(seriesId, extraParams = '') {
+  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(res.status);
+  const j = await res.json();
+  return (j.observations || []).filter(o => o.value !== '.');
+}
+
+async function fetchFredData() {
+  if (!cfg('FRED_API_KEY')) return;
+  try {
+    const [rateL, rateU, cpi, coreCpi, pce, unemp, gdp, nfp] = await Promise.all([
+      fetchFredSingle('DFEDTARL'),
+      fetchFredSingle('DFEDTARU'),
+      fetchFredSingle('CPIAUCSL', '&units=pc1'),
+      fetchFredSingle('CPILFESL', '&units=pc1'),
+      fetchFredSingle('PCEPILFE', '&units=pc1'),
+      fetchFredSingle('UNRATE'),
+      fetchFredSingle('A191RL1Q225SBEA'),
+      fetchFredSingle('PAYEMS', '&units=chg'),
+    ]);
+
+    if (rateL[0] && rateU[0]) {
+      const lo = parseFloat(rateL[0].value), hi = parseFloat(rateU[0].value);
+      FED_DATA.nextMeeting.rateNow = `${lo.toFixed(2)}–${hi.toFixed(2)}%`;
+    }
+
+    const series = [cpi, coreCpi, pce, unemp, gdp, nfp];
+    const scales  = [  1,      1,   1,    1,   1, 0.1];
+    series.forEach((obs, i) => {
+      if (obs[0]) FED_DATA.indicators[i].current = +(parseFloat(obs[0].value) * scales[i]).toFixed(1);
+      if (obs[1]) FED_DATA.indicators[i].prev    = +(parseFloat(obs[1].value) * scales[i]).toFixed(1);
+    });
+
+    LIVE_SOURCES.fed = true;
+  } catch (_) {}
 }
 
 async function fetchAndUpdateLiveData() {
@@ -213,6 +267,7 @@ async function fetchAndUpdateLiveData() {
     );
   }
 
+  tasks.push(fetchFredData());
   await Promise.allSettled(tasks);
 }
 
@@ -285,7 +340,7 @@ function renderOverview() {
       <div class="fed-rate-divider"></div>
       <div class="fed-rate-col">
         <div class="fed-rate-label">下次 FOMC</div>
-        <div class="fed-rate-val fed-rate-val-sm">${fedMtg.date}</div>
+        <div class="fed-rate-val fed-rate-val-sm">${nextFOMC().display}</div>
         <div class="fed-rate-sub">預期 ${fedMtg.rateExpected}</div>
       </div>
       <div class="fed-rate-divider"></div>
@@ -320,10 +375,16 @@ function renderOverview() {
       </div>`;
   }).join('');
 
+  const liveItems = [
+    LIVE_SOURCES.watchlist && '自選股（Polygon.io / Fugle）',
+    LIVE_SOURCES.fed && '總經指標（FRED）',
+  ].filter(Boolean);
+  const liveBanner = liveItems.length
+    ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時資料：${liveItems.join('、')}</div>`
+    : `<div class="info-banner">📡 模擬資料 — 在 <strong>config.js</strong> 填入 API Key 可取得即時報價與總經數據</div>`;
+
   return `
-    ${LIVE_SOURCES.watchlist
-      ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 自選股為即時報價（Polygon.io / Fugle）</div>`
-      : `<div class="info-banner">📡 模擬資料 — 在 <strong>config.js</strong> 填入 API Key 即可取得即時報價</div>`}
+    ${liveBanner}
     <div class="card">
       <div class="card-title"><span class="dot"></span>主要指數</div>
       <div class="price-grid">${indices}</div>

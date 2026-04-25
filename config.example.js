@@ -28,6 +28,10 @@ const CONFIG = {
 
   // ── 自選股清單 ────────────────────────────────────────────────────────
   // 修改這裡即可自訂追蹤的股票，無需動 app.js
+  // FRED (Federal Reserve Economic Data) - 自動更新總經指標
+  // 申請：https://fred.stlouisfed.org/docs/api/api_key.html → 免費，不需信用卡
+  FRED_API_KEY: 'your_fred_api_key_here',
+
   WATCHLIST_US: ['AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'AMZN'],
   WATCHLIST_TW: ['2330', '2317', '2454', '2382', '2308', '3017'],
 
