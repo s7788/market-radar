@@ -320,7 +320,7 @@ async function fetchAIFrontierNews() {
       if (seen.has(brand.brand)) continue;
       seen.add(brand.brand);
       items.push({ logo: brand.logo, brand: brand.brand, headline: a.title, date: relativeDate(a.publishedAt), url: a.url });
-      if (items.length >= 6) break;
+      if (items.length >= 5) break;
     }
 
     if (items.length) {
@@ -886,7 +886,7 @@ function renderDiscover() {
 const GH_CACHE_KEY = 'gh_trending_v1';
 const GH_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
-const AI_NEWS_CACHE_KEY = 'ai_news_v2';
+const AI_NEWS_CACHE_KEY = 'ai_news_v3';
 const AI_NEWS_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
 async function loadGitHub() {
