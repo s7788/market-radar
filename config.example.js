@@ -35,4 +35,7 @@ const CONFIG = {
   WATCHLIST_US: ['AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'AMZN'],
   WATCHLIST_TW: ['2330', '2317', '2454', '2382', '2308', '3017'],
 
+  // ── 部署版本（CI 自動覆寫，本地開發用 'dev'）────────────────────────────
+  BUILD_VERSION: 'dev',
+
 };

@@ -136,6 +136,7 @@ const GEO_NEWS = [
   { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump calls on Fed to cut rates "immediately by at least 1 point", renews attacks on Powell over inflation policy', src: 'Bloomberg', date: '2026-04-22' },
   { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US-Iran nuclear talks in Geneva stall as Iran rejects uranium enrichment cap; US warns of consequences', src: 'AP', date: '2026-04-24' },
   { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US deploys second carrier strike group to Strait of Hormuz; Iran Revolutionary Guard declares high alert', src: 'FT', date: '2026-04-21' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order accelerating critical minerals supply chain, targeting reduced China dependency', src: 'WSJ', date: '2026-04-20' },
 ];
 
 const TW_STOCKS_PE = [
@@ -156,7 +157,7 @@ const ML_CLOCK_POSITION = 0.75; // 0-3 clock position (0=12點=Recovery起點)
 // ── Config Helpers ────────────────────────────────────────────────────────
 
 // Tracks which data sources are currently live (vs mock)
-const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false, geoNews: false };
+const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false, geoNews: false, marketNews: false };
 
 // Returns true only if the key exists in CONFIG and is not a placeholder
 function cfg(key) {
@@ -365,16 +366,13 @@ async function fetchGeoNews() {
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
-    const seen = { trump: 0, iran: 0 };
     const items = [];
     for (const a of (j.articles || [])) {
       if (!a.title || !a.url) continue;
       const cat = detectGeoTopic(a.title);
       if (!cat) continue;
-      if (seen[cat.topic] >= 2) continue;
-      seen[cat.topic]++;
       items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: relativeDate(a.publishedAt), url: a.url });
-      if (seen.trump >= 2 && seen.iran >= 2) break;
+      if (items.length >= 5) break;
     }
 
     if (items.length) {
@@ -382,6 +380,58 @@ async function fetchGeoNews() {
       GEO_NEWS.length = 0;
       GEO_NEWS.push(...items);
       LIVE_SOURCES.geoNews = true;
+    }
+  } catch (_) {}
+}
+
+const MARKET_NEWS_CACHE_KEY = 'market_news_v1';
+const MARKET_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
+
+function categorizeMarketNews(title, source) {
+  const t = (title + ' ' + source).toLowerCase();
+  if (t.includes('earnings') || t.includes('eps') || t.includes('quarterly') || /q[1-4]\b/.test(t)) return { tag: 'earnings', label: '財報' };
+  if (t.includes('chatgpt') || t.includes('openai') || t.includes('anthropic') || t.includes('nvidia') || t.includes('artificial intel') || t.includes(' llm') || t.includes(' ai ')) return { tag: 'ai', label: 'AI' };
+  if (t.includes('taiwan') || t.includes('tsmc') || t.includes('mediatek') || t.includes('foxconn') || t.includes('台積') || t.includes('台股')) return { tag: 'tw', label: '台股' };
+  if (t.includes('fed') || t.includes('inflation') || t.includes('cpi') || t.includes('powell') || t.includes('rate cut') || t.includes('treasury') || t.includes('jobs report')) return { tag: 'macro', label: '總經' };
+  return { tag: 'us', label: '美股' };
+}
+
+async function fetchMarketNews() {
+  if (!cfg('GNEWS_API_KEY')) return;
+
+  try {
+    const cached = localStorage.getItem(MARKET_NEWS_CACHE_KEY);
+    if (cached) {
+      const { items, ts } = JSON.parse(cached);
+      if (Date.now() - ts < MARKET_NEWS_CACHE_TTL) {
+        NEWS.length = 0;
+        NEWS.push(...items);
+        LIVE_SOURCES.marketNews = true;
+        return;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve"');
+    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=10&apikey=${CONFIG.GNEWS_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(res.status);
+    const j = await res.json();
+
+    const items = [];
+    for (const a of (j.articles || [])) {
+      if (!a.title || !a.url) continue;
+      const cat = categorizeMarketNews(a.title, a.source?.name || '');
+      items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.source?.name || '', time: relativeDate(a.publishedAt), url: a.url });
+      if (items.length >= 5) break;
+    }
+
+    if (items.length) {
+      try { localStorage.setItem(MARKET_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now() })); } catch (_) {}
+      NEWS.length = 0;
+      NEWS.push(...items);
+      LIVE_SOURCES.marketNews = true;
     }
   } catch (_) {}
 }
@@ -432,6 +482,7 @@ async function fetchAndUpdateLiveData() {
   tasks.push(fetchLiveMarketData());
   tasks.push(fetchAIFrontierNews());
   tasks.push(fetchGeoNews());
+  tasks.push(fetchMarketNews());
   await Promise.allSettled(tasks);
 }
 
@@ -484,23 +535,32 @@ function renderOverview() {
       </div>
     </div>`).join('');
 
-  const geoRows = GEO_NEWS.map(g => {
+  const geoSlice = GEO_NEWS.slice(0, 5);
+  const geoRows = geoSlice.map((g, i) => {
     const tag = g.url ? 'a' : 'div';
     const href = g.url ? ` href="${g.url}" target="_blank" rel="noopener"` : '';
+    const style = i >= 3 ? ' style="display:none"' : '';
     const displayDate = /^\d{4}-\d{2}-\d{2}/.test(g.date) ? relativeDate(g.date) : g.date;
-    return `<${tag} class="news-item"${href}>
+    return `<${tag} class="news-item"${href}${style}>
       <div><span class="news-tag tag-${g.topic}">${g.icon} ${g.label}</span></div>
       <div class="news-headline">${g.headline}</div>
       <div class="news-meta">${g.src} · ${displayDate}</div>
     </${tag}>`;
   }).join('');
+  const geoBtn = geoSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${geoSlice.length})">展開全部 ${geoSlice.length} 筆 ▼</button>` : '';
 
-  const topNews = NEWS.slice(0, 4).map(n => `
-    <div class="news-item">
+  const newsSlice = NEWS.slice(0, 5);
+  const topNews = newsSlice.map((n, i) => {
+    const tag = n.url ? 'a' : 'div';
+    const href = n.url ? ` href="${n.url}" target="_blank" rel="noopener"` : '';
+    const style = i >= 3 ? ' style="display:none"' : '';
+    return `<${tag} class="news-item"${href}${style}>
       <div><span class="news-tag tag-${n.tag}">${n.label}</span></div>
       <div class="news-headline">${n.title}</div>
       <div class="news-meta">${n.src} · ${n.time}</div>
-    </div>`).join('');
+    </${tag}>`;
+  }).join('');
+  const newsBtn = newsSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${newsSlice.length})">展開全部 ${newsSlice.length} 筆 ▼</button>` : '';
 
   const fedMtg = FED_DATA.nextMeeting;
   const cutProbColor = fedMtg.cutProb >= 50
@@ -556,6 +616,7 @@ function renderOverview() {
     LIVE_SOURCES.fed        && '總經指標（FRED）',
     LIVE_SOURCES.aiFrontier && 'AI前沿消息（GNews）',
     LIVE_SOURCES.geoNews    && '地緣政治（GNews）',
+    LIVE_SOURCES.marketNews && '市場新聞（GNews）',
   ].filter(Boolean);
   const liveBanner = liveItems.length
     ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時資料：${liveItems.join('、')}</div>`
@@ -578,23 +639,31 @@ function renderOverview() {
     </div>
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--red)"></span>地緣政治 & 川普言論</div>
-      ${geoRows}
+      <div class="expandable">${geoRows}</div>
+      ${geoBtn}
     </div>
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--green)"></span>今日快訊</div>
-      ${topNews}
+      <div class="expandable">${topNews}</div>
+      ${newsBtn}
     </div>`;
 }
 
 // ── Render: News ──────────────────────────────────────────────────────────
 
 function renderNews() {
-  const allNews = NEWS.map(n => `
-    <div class="news-item">
+  const allSlice = NEWS.slice(0, 5);
+  const allNews = allSlice.map((n, i) => {
+    const tag = n.url ? 'a' : 'div';
+    const href = n.url ? ` href="${n.url}" target="_blank" rel="noopener"` : '';
+    const style = i >= 3 ? ' style="display:none"' : '';
+    return `<${tag} class="news-item"${href}${style}>
       <div><span class="news-tag tag-${n.tag}">${n.label}</span></div>
       <div class="news-headline">${n.title}</div>
       <div class="news-meta">${n.src} · ${n.time}</div>
-    </div>`).join('');
+    </${tag}>`;
+  }).join('');
+  const allNewsBtn = allSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${allSlice.length})">展開全部 ${allSlice.length} 筆 ▼</button>` : '';
 
   const watchItems = WATCHLIST.map(s => `
     <div class="price-cell">
@@ -630,7 +699,8 @@ function renderNews() {
     </div>
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--green)"></span>市場要聞</div>
-      ${allNews}
+      <div class="expandable">${allNews}</div>
+      ${allNewsBtn}
     </div>`;
 }
 
@@ -822,11 +892,13 @@ function renderAI() {
       </div>`;
   }).join('');
 
-  const frontier = AI_FRONTIER.map(f => {
+  const frontierSlice = AI_FRONTIER.slice(0, 5);
+  const frontier = frontierSlice.map((f, i) => {
     const tag = f.url ? 'a' : 'div';
     const href = f.url ? ` href="${f.url}" target="_blank" rel="noopener"` : '';
+    const style = i >= 3 ? ' style="display:none"' : '';
     const displayDate = /^\d{4}-\d{2}-\d{2}/.test(f.date) ? relativeDate(f.date) : f.date;
-    return `<${tag} class="frontier-item"${href}>
+    return `<${tag} class="frontier-item"${href}${style}>
       <div class="frontier-logo">${f.logo}</div>
       <div class="frontier-content">
         <div class="frontier-brand">${f.brand}</div>
@@ -835,9 +907,10 @@ function renderAI() {
       </div>
     </${tag}>`;
   }).join('');
+  const frontierBtn = frontierSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${frontierSlice.length})">展開全部 ${frontierSlice.length} 筆 ▼</button>` : '';
 
   const aiBanner = LIVE_SOURCES.aiFrontier
-    ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時新聞（NewsAPI）· 每30分鐘更新</div>`
+    ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時新聞（GNews）· 每30分鐘更新</div>`
     : '';
 
   return `
@@ -848,7 +921,8 @@ function renderAI() {
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--blue)"></span>AI前沿消息</div>
       ${aiBanner}
-      ${frontier}
+      <div class="expandable">${frontier}</div>
+      ${frontierBtn}
     </div>`;
 }
 
@@ -973,13 +1047,26 @@ function switchTab(id) {
 async function refresh() {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spinning');
+  // Clear all caches so a manual refresh always pulls fresh data
   localStorage.removeItem(GH_CACHE_KEY);
   localStorage.removeItem(AI_NEWS_CACHE_KEY);
+  localStorage.removeItem(GEO_NEWS_CACHE_KEY);
+  localStorage.removeItem(MARKET_NEWS_CACHE_KEY);
   await fetchAndUpdateLiveData();
   switchTab(activeTab);
   btn.classList.remove('spinning');
-  const anyLive = LIVE_SOURCES.watchlist || LIVE_SOURCES.market || LIVE_SOURCES.fed || LIVE_SOURCES.aiFrontier;
+  const anyLive = Object.values(LIVE_SOURCES).some(Boolean);
   document.getElementById('last-updated').textContent = `${anyLive ? '即時' : '更新'}: ${now()}`;
+}
+
+function toggleExpand(btn, total) {
+  const wrap = btn.previousElementSibling;
+  if (!wrap) return;
+  const expanded = wrap.classList.toggle('expanded');
+  Array.from(wrap.children).forEach((el, i) => {
+    if (i >= 3) el.style.display = expanded ? '' : 'none';
+  });
+  btn.textContent = expanded ? '收合 ▲' : `展開全部 ${total} 筆 ▼`;
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────
@@ -1005,13 +1092,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('last-updated').textContent = `更新: ${now()}`;
   document.getElementById('refresh-btn').addEventListener('click', refresh);
 
+  // Build version (injected by GitHub Action at deploy time)
+  const versionEl = document.getElementById('build-version');
+  if (versionEl) {
+    const v = (typeof CONFIG !== 'undefined' && CONFIG.BUILD_VERSION) ? CONFIG.BUILD_VERSION : '';
+    versionEl.textContent = v ? `v${v}` : 'dev';
+  }
+
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
   // 背景取得即時資料，完成後重繪當前分頁
   await fetchAndUpdateLiveData();
-  if (LIVE_SOURCES.watchlist || LIVE_SOURCES.market || LIVE_SOURCES.fed || LIVE_SOURCES.aiFrontier) {
+  if (Object.values(LIVE_SOURCES).some(Boolean)) {
     switchTab(activeTab);
     document.getElementById('last-updated').textContent = `即時: ${now()}`;
   }
