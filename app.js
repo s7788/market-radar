@@ -17,14 +17,14 @@ const COMMODITIES = [
 ];
 
 const FED_DATA = {
-  nextMeeting: { date: '6月17–18日', rateNow: '4.25–4.50%', rateExpected: '4.00–4.25%', cutProb: 72 },
+  nextMeeting: { date: '4月28–29日', rateNow: '3.50–3.75%', rateExpected: '3.50–3.75%', cutProb: 11 },
   indicators: [
-    { label: 'CPI 通膨率',  unit: '%',  current:  2.4,  prev:  2.8,  forecast:  2.3, forecastDate: '5月13日', better: 'down' },
-    { label: '核心 CPI',    unit: '%',  current:  2.8,  prev:  3.1,  forecast:  2.6, forecastDate: '5月13日', better: 'down' },
-    { label: 'PCE 通膨',    unit: '%',  current:  2.3,  prev:  2.5,  forecast:  2.2, forecastDate: '4月30日', better: 'down' },
-    { label: '失業率',      unit: '%',  current:  4.2,  prev:  4.1,  forecast:  4.3, forecastDate: '5月2日',  better: 'down' },
-    { label: 'GDP (QoQ)',   unit: '%',  current: -0.3,  prev:  2.4,  forecast:  0.8, forecastDate: 'Q2預測',  better: 'up'   },
-    { label: '非農就業',    unit: '萬', current: 17.7,  prev: 15.1,  forecast: 18.0, forecastDate: '5月2日',  better: 'up'   },
+    { label: 'CPI 通膨率',  unit: '%',  current:  3.3,  prev:  2.4,  forecast:  3.1, forecastDate: '5月12日', better: 'down' },
+    { label: '核心 CPI',    unit: '%',  current:  2.6,  prev:  2.5,  forecast:  2.5, forecastDate: '5月12日', better: 'down' },
+    { label: 'PCE 通膨',    unit: '%',  current:  2.5,  prev:  2.3,  forecast:  2.7, forecastDate: '4月30日', better: 'down' },
+    { label: '失業率',      unit: '%',  current:  4.3,  prev:  4.4,  forecast:  4.4, forecastDate: '5月2日',  better: 'down' },
+    { label: 'GDP (QoQ)',   unit: '%',  current:  1.2,  prev:  2.3,  forecast:  1.8, forecastDate: '4月30日', better: 'up'   },
+    { label: '非農就業',    unit: '萬', current: 17.8,  prev: 15.1,  forecast: 14.5, forecastDate: '5月2日',  better: 'up'   },
   ],
 };
 
@@ -273,7 +273,9 @@ function renderOverview() {
     </div>`).join('');
 
   const fedMtg = FED_DATA.nextMeeting;
-  const cutProbColor = fedMtg.cutProb >= 60 ? 'var(--green)' : fedMtg.cutProb >= 40 ? 'var(--yellow)' : 'var(--red)';
+  const cutProbColor = fedMtg.cutProb >= 50
+    ? (fedMtg.cutProb >= 70 ? 'var(--green)' : 'var(--yellow)')
+    : (fedMtg.cutProb <= 20 ? 'var(--text-muted)' : 'var(--yellow)');
   const fedRateBox = `
     <div class="fed-rate-box">
       <div class="fed-rate-col">
@@ -288,8 +290,8 @@ function renderOverview() {
       </div>
       <div class="fed-rate-divider"></div>
       <div class="fed-rate-col">
-        <div class="fed-rate-label">降息機率</div>
-        <div class="fed-rate-val" style="color:${cutProbColor}">${fedMtg.cutProb}%</div>
+        <div class="fed-rate-label">${fedMtg.cutProb >= 50 ? '降息機率' : '維持機率'}</div>
+        <div class="fed-rate-val" style="color:${cutProbColor}">${fedMtg.cutProb >= 50 ? fedMtg.cutProb : 100 - fedMtg.cutProb}%</div>
         <div class="fed-rate-sub" style="color:${cutProbColor}">CME FedWatch</div>
       </div>
     </div>`;
