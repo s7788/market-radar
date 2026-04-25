@@ -1,19 +1,19 @@
 // ── Mock Data ─────────────────────────────────────────────────────────────
 
 const INDICES = [
-  { name: 'S&P 500',  symbol: 'SPX',  price: 5847.23, change:  12.45, pct:  0.21 },
-  { name: 'NASDAQ',   symbol: 'NDX',  price: 19134.56, change: -45.23, pct: -0.24 },
-  { name: '道瓊指數', symbol: 'DJI',  price: 43215.67, change:  89.32, pct:  0.21 },
-  { name: '台股加權', symbol: 'TWSE', price: 21456.78, change: 234.56, pct:  1.10 },
+  { name: 'S&P 500',  symbol: 'SPX',  price:  7165.80, change:  56.80, pct:  0.80 },
+  { name: 'NASDAQ',   symbol: 'NDX',  price: 24837.00, change: 390.00, pct:  1.60 },
+  { name: '道瓊指數', symbol: 'DJI',  price: 49231.00, change: -98.46, pct: -0.20 },
+  { name: '台股加權', symbol: 'TWSE', price: 38933.87, change: 189.43, pct:  0.49 },
 ];
 
 const COMMODITIES = [
-  { name: 'WTI原油',    symbol: 'OIL',   price:  68.45,  unit: '$/桶',  change: -1.23, pct: -1.77, icon: '🛢️' },
-  { name: '黃金',       symbol: 'GOLD',  price: 3215.30, unit: '$/oz',  change: 23.40, pct:  0.73, icon: '🥇' },
-  { name: '美元指數',   symbol: 'DXY',   price:  103.45, unit: '',      change:  0.23, pct:  0.22, icon: '💵' },
-  { name: '美元/日圓',  symbol: 'USDJPY',price:  151.23, unit: '',      change:  0.45, pct:  0.30, icon: '¥' },
-  { name: 'VIX恐慌指數',symbol: 'VIX',   price:   18.45, unit: '',      change: -1.23, pct: -6.25, icon: '📊' },
-  { name: '美元/台幣',   symbol: 'USDTWD',price:   32.15, unit: '',      change:  0.05, pct:  0.16, icon: '🇹🇼' },
+  { name: 'WTI原油',    symbol: 'OIL',   price:  94.88,  unit: '$/桶',  change: -0.97, pct: -1.01, icon: '🛢️' },
+  { name: '黃金',       symbol: 'GOLD',  price: 4740.00, unit: '$/oz',  change: 16.21, pct:  0.34, icon: '🥇' },
+  { name: '美元指數',   symbol: 'DXY',   price:  98.36,  unit: '',      change: -0.24, pct: -0.24, icon: '💵' },
+  { name: '美元/日圓',  symbol: 'USDJPY',price: 159.30,  unit: '',      change: -0.32, pct: -0.20, icon: '¥' },
+  { name: 'VIX恐慌指數',symbol: 'VIX',   price:  18.71,  unit: '',      change: -0.60, pct: -3.11, icon: '📊' },
+  { name: '美元/台幣',   symbol: 'USDTWD',price:  31.48,  unit: '',      change: -0.12, pct: -0.38, icon: '🇹🇼' },
 ];
 
 const FED_DATA = {
