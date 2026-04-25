@@ -24,6 +24,7 @@ jobs:
           GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: |
+          BUILD_VERSION=$(TZ='Asia/Taipei' date '+%Y%m%d%H%M')
           cat > config.js << EOF
           const CONFIG = {
             POLYGON_API_KEY: '${POLYGON_API_KEY}',
@@ -31,6 +32,7 @@ jobs:
             GITHUB_TOKEN: '${GH_API_TOKEN}',
             GNEWS_API_KEY: '${GNEWS_API_KEY}',
             FRED_API_KEY: '${FRED_API_KEY}',
+            BUILD_VERSION: '${BUILD_VERSION}',
             WATCHLIST_US: ['AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'AMZN', 'TSLA', 'NBIS', 'ARM', 'AMD', 'ALAB', 'CRSP', 'MU', 'VRT', 'AVGO', 'CRWV', 'LEU', 'ONDS', 'PLTR', 'SMCI', 'SNDK', 'TSM', 'UUUU', 'VIX', 'VRT'],
             WATCHLIST_TW: ['2330', '2317', '2454', '2382', '2308', '3017'],
           };

@@ -52,6 +52,16 @@ body {
 #app-header h1 span { color: var(--blue); }
 .header-right { display: flex; align-items: center; gap: 8px; }
 #last-updated { font-size: .72rem; color: var(--text-muted); }
+#build-version {
+  font-size: .62rem;
+  color: var(--text-dim);
+  font-family: ui-monospace, 'SF Mono', Monaco, Menlo, monospace;
+  letter-spacing: .02em;
+  padding: 2px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
 #refresh-btn {
   background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
   color: var(--text-muted); padding: 4px 10px; font-size: .78rem; cursor: pointer;
@@ -392,6 +402,25 @@ a.frontier-item:hover { background: var(--card-hover); margin: 0 -14px; padding-
   font-size: .73rem; color: var(--yellow); line-height: 1.5;
   margin-bottom: 10px;
 }
+
+/* ── Expand / collapse list ── */
+.expand-btn {
+  width: 100%;
+  margin-top: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  padding: 8px;
+  font-size: .73rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.expand-btn:hover { background: var(--card-hover); color: var(--text); }
+.expand-btn:active { background: var(--card-hover); }
 
 /* ── Utilities ── */
 .flex-row { display: flex; align-items: center; gap: 8px; }
