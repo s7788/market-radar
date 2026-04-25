@@ -1,4 +1,4 @@
-const CACHE_NAME = 'market-radar-v2';
+const CACHE_NAME = 'market-radar-v3';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/config.js', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', e => {
@@ -17,15 +17,21 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  // Network-first for API calls
-  if (url.hostname === 'api.github.com') {
+  // Network-first for all same-origin app files — always get latest version
+  if (url.origin === self.location.origin) {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
+      fetch(e.request)
+        .then(res => {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then(c => c.put(e.request, clone));
+          return res;
+        })
+        .catch(() => caches.match(e.request))
     );
     return;
   }
-  // Cache-first for app shell
+  // Network-first for external API calls
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
+    fetch(e.request).catch(() => caches.match(e.request))
   );
 });
