@@ -289,7 +289,10 @@ body {
 .frontier-item {
   display: flex; gap: 10px; padding: 10px 0;
   border-bottom: 1px solid var(--border);
+  text-decoration: none; color: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
+a.frontier-item:hover { background: var(--card-hover); margin: 0 -14px; padding-left: 14px; padding-right: 14px; border-radius: var(--radius-sm); }
 .frontier-item:last-child { border-bottom: none; padding-bottom: 0; }
 .frontier-item:first-child { padding-top: 0; }
 .frontier-logo {

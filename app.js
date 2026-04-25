@@ -151,7 +151,7 @@ const ML_CLOCK_POSITION = 0.75; // 0-3 clock position (0=12點=Recovery起點)
 // ── Config Helpers ────────────────────────────────────────────────────────
 
 // Tracks which data sources are currently live (vs mock)
-const LIVE_SOURCES = { watchlist: false, fed: false, market: false };
+const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false };
 
 // Returns true only if the key exists in CONFIG and is not a placeholder
 function cfg(key) {
@@ -263,6 +263,70 @@ async function fetchLiveMarketData() {
   if (hits.length) LIVE_SOURCES.market = true;
 }
 
+function detectAIBrand(source, title) {
+  const t = (source + ' ' + title).toLowerCase();
+  if (t.includes('anthropic') || t.includes(' claude')) return { logo: '🤖', brand: 'Anthropic / Claude' };
+  if (t.includes('openai') || t.includes('gpt-') || t.includes('chatgpt')) return { logo: '🔮', brand: 'OpenAI' };
+  if (t.includes('deepmind') || t.includes('gemini') || t.includes('google ai')) return { logo: '♊', brand: 'Google DeepMind' };
+  if (t.includes('llama') || t.includes('meta ai')) return { logo: '🦾', brand: 'Meta AI' };
+  if (t.includes('grok') || t.includes(' xai') || t.includes('x.ai')) return { logo: '🌐', brand: 'xAI / Grok' };
+  if (t.includes('mistral')) return { logo: '🌊', brand: 'Mistral' };
+  return null;
+}
+
+function relativeDate(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const h = Math.floor(diff / 3600000), d = Math.floor(diff / 86400000);
+  if (h < 1) return '剛剛';
+  if (h < 24) return `${h}小時前`;
+  if (d < 7) return `${d}天前`;
+  return `${Math.floor(d / 7)}週前`;
+}
+
+async function fetchAIFrontierNews() {
+  if (!cfg('NEWS_API_KEY')) return;
+
+  try {
+    const cached = localStorage.getItem(AI_NEWS_CACHE_KEY);
+    if (cached) {
+      const { items, ts } = JSON.parse(cached);
+      if (Date.now() - ts < AI_NEWS_CACHE_TTL) {
+        AI_FRONTIER.length = 0;
+        AI_FRONTIER.push(...items);
+        LIVE_SOURCES.aiFrontier = true;
+        return;
+      }
+    }
+  } catch (_) {}
+
+  try {
+    const q = encodeURIComponent('Anthropic OR OpenAI OR "Google DeepMind" OR "Meta AI" OR Gemini OR Claude OR Grok OR Mistral OR Llama');
+    const url = `https://newsapi.org/v2/everything?q=${q}&language=en&sortBy=publishedAt&pageSize=30&apiKey=${CONFIG.NEWS_API_KEY}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(res.status);
+    const j = await res.json();
+    const articles = (j.articles || []).filter(a => a.title && a.url && !a.title.includes('[Removed]'));
+
+    const seen = new Set();
+    const items = [];
+    for (const a of articles) {
+      const brand = detectAIBrand(a.source?.name || '', a.title);
+      if (!brand) continue;
+      if (seen.has(brand.brand)) continue;
+      seen.add(brand.brand);
+      items.push({ logo: brand.logo, brand: brand.brand, headline: a.title, date: relativeDate(a.publishedAt), url: a.url });
+      if (items.length >= 6) break;
+    }
+
+    if (items.length) {
+      try { localStorage.setItem(AI_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now() })); } catch (_) {}
+      AI_FRONTIER.length = 0;
+      AI_FRONTIER.push(...items);
+      LIVE_SOURCES.aiFrontier = true;
+    }
+  } catch (_) {}
+}
+
 async function fetchAndUpdateLiveData() {
   const tasks = [];
 
@@ -307,6 +371,7 @@ async function fetchAndUpdateLiveData() {
 
   tasks.push(fetchFredData());
   tasks.push(fetchLiveMarketData());
+  tasks.push(fetchAIFrontierNews());
   await Promise.allSettled(tasks);
 }
 
@@ -415,9 +480,10 @@ function renderOverview() {
   }).join('');
 
   const liveItems = [
-    LIVE_SOURCES.watchlist && '自選股（Polygon.io / Fugle）',
-    LIVE_SOURCES.market    && '指數 & 原物料（Polygon.io）',
-    LIVE_SOURCES.fed       && '總經指標（FRED）',
+    LIVE_SOURCES.watchlist  && '自選股（Polygon.io / Fugle）',
+    LIVE_SOURCES.market     && '指數 & 原物料（Polygon.io）',
+    LIVE_SOURCES.fed        && '總經指標（FRED）',
+    LIVE_SOURCES.aiFrontier && 'AI前沿消息（NewsAPI）',
   ].filter(Boolean);
   const liveBanner = liveItems.length
     ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時資料：${liveItems.join('、')}</div>`
@@ -680,15 +746,22 @@ function renderAI() {
       </div>`;
   }).join('');
 
-  const frontier = AI_FRONTIER.map(f => `
-    <div class="frontier-item">
+  const frontier = AI_FRONTIER.map(f => {
+    const tag = f.url ? 'a' : 'div';
+    const href = f.url ? ` href="${f.url}" target="_blank" rel="noopener"` : '';
+    return `<${tag} class="frontier-item"${href}>
       <div class="frontier-logo">${f.logo}</div>
       <div class="frontier-content">
         <div class="frontier-brand">${f.brand}</div>
         <div class="frontier-headline">${f.headline}</div>
         <div class="frontier-date">${f.date}</div>
       </div>
-    </div>`).join('');
+    </${tag}>`;
+  }).join('');
+
+  const aiBanner = LIVE_SOURCES.aiFrontier
+    ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時新聞（NewsAPI）· 每30分鐘更新</div>`
+    : '';
 
   return `
     <div class="card">
@@ -697,6 +770,7 @@ function renderAI() {
     </div>
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--blue)"></span>AI前沿消息</div>
+      ${aiBanner}
       ${frontier}
     </div>`;
 }
@@ -734,6 +808,9 @@ function renderDiscover() {
 
 const GH_CACHE_KEY = 'gh_trending_v1';
 const GH_CACHE_TTL = 30 * 60 * 1000; // 30 min
+
+const AI_NEWS_CACHE_KEY = 'ai_news_v1';
+const AI_NEWS_CACHE_TTL = 30 * 60 * 1000; // 30 min
 
 async function loadGitHub() {
   const el = document.getElementById('github-list');
@@ -820,10 +897,11 @@ async function refresh() {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spinning');
   localStorage.removeItem(GH_CACHE_KEY);
+  localStorage.removeItem(AI_NEWS_CACHE_KEY);
   await fetchAndUpdateLiveData();
   switchTab(activeTab);
   btn.classList.remove('spinning');
-  const anyLive = LIVE_SOURCES.watchlist || LIVE_SOURCES.market || LIVE_SOURCES.fed;
+  const anyLive = LIVE_SOURCES.watchlist || LIVE_SOURCES.market || LIVE_SOURCES.fed || LIVE_SOURCES.aiFrontier;
   document.getElementById('last-updated').textContent = `${anyLive ? '即時' : '更新'}: ${now()}`;
 }
 
@@ -856,7 +934,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 背景取得即時資料，完成後重繪當前分頁
   await fetchAndUpdateLiveData();
-  if (LIVE_SOURCES.watchlist || LIVE_SOURCES.market || LIVE_SOURCES.fed) {
+  if (LIVE_SOURCES.watchlist || LIVE_SOURCES.market || LIVE_SOURCES.fed || LIVE_SOURCES.aiFrontier) {
     switchTab(activeTab);
     document.getElementById('last-updated').textContent = `即時: ${now()}`;
   }
