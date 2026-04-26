@@ -136,11 +136,11 @@ const AI_FRONTIER = [
 ];
 
 const GEO_NEWS = [
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump announces 25% tariffs on all steel and aluminum imports, threatens secondary tariffs on nations not buying US energy', src: 'Reuters', date: '2026-04-23', impact: 'bear' },
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump calls on Fed to cut rates "immediately by at least 1 point", renews attacks on Powell over inflation policy', src: 'Bloomberg', date: '2026-04-22', impact: 'bull' },
-  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US-Iran nuclear talks in Geneva stall as Iran rejects uranium enrichment cap; US warns of consequences', src: 'AP', date: '2026-04-24', impact: 'bear' },
-  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US deploys second carrier strike group to Strait of Hormuz; Iran Revolutionary Guard declares high alert', src: 'FT', date: '2026-04-21', impact: 'bear' },
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order accelerating critical minerals supply chain, targeting reduced China dependency', src: 'WSJ', date: '2026-04-20', impact: 'neutral' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump announces 25% tariffs on all steel and aluminum imports, threatens secondary tariffs on nations not buying US energy', src: 'Reuters', date: '2026-04-23' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump calls on Fed to cut rates "immediately by at least 1 point", renews attacks on Powell over inflation policy', src: 'Bloomberg', date: '2026-04-22' },
+  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US-Iran nuclear talks in Geneva stall as Iran rejects uranium enrichment cap; US warns of consequences', src: 'AP', date: '2026-04-24' },
+  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US deploys second carrier strike group to Strait of Hormuz; Iran Revolutionary Guard declares high alert', src: 'FT', date: '2026-04-21' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order accelerating critical minerals supply chain, targeting reduced China dependency', src: 'WSJ', date: '2026-04-20' },
 ];
 
 const TW_STOCKS_PE = [
@@ -178,120 +178,55 @@ const US_NAMES = {
   QCOM:'Qualcomm', INTC:'Intel', ARM:'ARM Holdings',
 };
 
-// Short-circuit retries on endpoints that are known to be failing right now
-// (free-tier 403 on indices, daily-quota 429 on GNews, broken proxies, etc.).
-// Without this, every page-load + refresh re-runs the same doomed requests
-// and pollutes the console.
-function isFailedRecently(key) {
+// Polygon free tier is 5 req/min — cache aggressively per-symbol so a refresh
+// burst of ~30 symbols doesn't blow the budget. Free-tier prev-day data is
+// 15+ min delayed anyway, so a 5-min cache costs us nothing.
+const POLYGON_CACHE_TTL = 5 * 60 * 1000;
+function readPolygonCache(symbol) {
   try {
-    const raw = localStorage.getItem('fail_' + key);
-    if (!raw) return false;
-    const { ts, ttl } = JSON.parse(raw);
-    return ts && Date.now() - ts < ttl;
-  } catch (_) { return false; }
+    const raw = localStorage.getItem(`pgn_${symbol}`);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (_) { return null; }
 }
-function markFailed(key, ttlMs) {
-  try { localStorage.setItem('fail_' + key, JSON.stringify({ ts: Date.now(), ttl: ttlMs })); } catch (_) {}
-}
-const FAIL_TTL_LONG  = 24 * 60 * 60 * 1000; // 24h — for plan/permission errors (403/401)
-const FAIL_TTL_SHORT = 60 * 60 * 1000;      // 1h  — for transient quota errors (429)
-
-// ── Twelve Data: US stocks + indices + FX in one batch call ──────────────
-//
-// Free tier: 800 credits/day, 8 credits/min. A batch of N symbols counts as
-// N credits but is a single HTTP request. We cap watchlist to 8 symbols so
-// the burst stays in budget.
-//
-// If a particular commodity symbol isn't available on the free tier (some
-// futures require Pro), applyTwelveDataQuote() returns false and the slot
-// keeps its mock value — no console errors thanks to the fail-cache.
-const TD_INDEX_SYMBOLS = ['SPX', 'IXIC', 'DJI'];                         // INDICES[0..2]
-const TD_COMMODITY_SYMBOLS = ['BRENT', 'XAU/USD', 'VIX', 'USD/TWD'];     // COMMODITIES[0..3]
-
-async function fetchTwelveDataBatch(symbols) {
-  if (!cfg('TWELVE_DATA_API_KEY') || !symbols.length) return {};
-  const failKey = 'td_' + symbols.slice().sort().join(',').slice(0, 60);
-  if (isFailedRecently(failKey)) return {};
-  const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbols.join(','))}&apikey=${CONFIG.TWELVE_DATA_API_KEY}`;
+async function fetchPolygonPrev(symbol) {
+  const cached = readPolygonCache(symbol);
+  if (cached && Date.now() - cached.ts < POLYGON_CACHE_TTL) return cached.data;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
-    if (res.status === 401 || res.status === 403) { markFailed(failKey, FAIL_TTL_LONG); return {}; }
-    if (res.status === 429) { markFailed(failKey, FAIL_TTL_SHORT); return {}; }
+    const res = await fetch(
+      `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${CONFIG.POLYGON_API_KEY}`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (res.status === 429) return cached?.data ?? null; // rate-limited: serve cached
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
-    // Single-symbol response is flat; multi-symbol is keyed by symbol.
-    if (symbols.length === 1) return j.symbol ? { [symbols[0]]: j } : {};
-    return j || {};
-  } catch (_) { return {}; }
-}
-
-function applyTwelveDataQuote(arr, idx, q) {
-  if (!q || q.code) return false; // q.code presence = error envelope per symbol
-  const close = parseFloat(q.close);
-  if (!isFinite(close)) return false;
-  arr[idx].price  = close;
-  arr[idx].change = +(parseFloat(q.change || 0)).toFixed(2);
-  arr[idx].pct    = +(parseFloat(q.percent_change || 0)).toFixed(2);
-  return true;
-}
-
-// TWSE OpenAPI for TAIEX (加權指數) — official, free, no auth, but does NOT
-// send CORS headers, so route through allorigins like FRED. Updates after
-// market close (end-of-day data); intraday would need mis.twse.com.tw.
-async function fetchTaiexFromTWSE() {
-  if (isFailedRecently('twse_taiex')) return false;
-  try {
-    const target = 'https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX';
-    const url = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(target);
-    const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
-    if (!res.ok) { markFailed('twse_taiex', FAIL_TTL_SHORT); return false; }
-    const arr = await res.json();
-    const taiex = arr.find(r => r.Index === '發行量加權股價指數' || (r.Index || '').includes('加權股價'));
-    if (!taiex) return false;
-    const close = parseFloat(String(taiex.ClosingIndex).replace(/,/g, ''));
-    const pts = parseFloat(String(taiex.ChangePoint).replace(/,/g, ''));
-    const pct = parseFloat(taiex.ChangePercentage);
-    const sign = taiex.Change === '▲' ? 1 : (taiex.Change === '▼' ? -1 : 0);
-    if (!isFinite(close)) return false;
-    INDICES[3].price  = close;
-    INDICES[3].change = +(sign * pts).toFixed(2);
-    INDICES[3].pct    = +(sign * pct).toFixed(2);
-    return true;
+    const data = j.results?.[0] ?? null;
+    if (data) {
+      try { localStorage.setItem(`pgn_${symbol}`, JSON.stringify({ data, ts: Date.now() })); } catch (_) {}
+    }
+    return data;
   } catch (_) {
-    markFailed('twse_taiex', FAIL_TTL_SHORT); // proxy/network failure — don't hammer
-    return false;
+    return cached?.data ?? null;
   }
 }
 
 async function fetchFugleQuote(symbol) {
-  const failKey = `fugle_${symbol}`;
-  if (isFailedRecently(failKey)) return null;
   const res = await fetch(
     `https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${symbol}`,
     { headers: { 'X-API-KEY': CONFIG.FUGLE_API_KEY }, signal: AbortSignal.timeout(8000) }
   );
-  if (res.status === 404 || res.status === 403) {
-    markFailed(failKey, FAIL_TTL_LONG);
-    return null;
-  }
   if (!res.ok) throw new Error(res.status);
   return res.json();
 }
 
 // FRED API does not send CORS headers, so route browser requests through a
-// public CORS proxy. allorigins.win is more reliable than corsproxy.io for
-// unauthenticated traffic as of 2026.
-const FRED_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+// public CORS proxy. corsproxy.io passes the response body through unchanged.
+const FRED_CORS_PROXY = 'https://corsproxy.io/?';
 async function fetchFredSingle(seriesId, extraParams = '') {
-  if (isFailedRecently(`fred_${seriesId}`)) throw new Error('fred-fail-cached');
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
   const url = FRED_CORS_PROXY + encodeURIComponent(target);
   const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
-  if (!res.ok) {
-    // Cache failure so we don't hammer the proxy on every page-load
-    markFailed(`fred_${seriesId}`, res.status === 403 || res.status === 401 ? FAIL_TTL_LONG : FAIL_TTL_SHORT);
-    throw new Error(res.status);
-  }
+  if (!res.ok) throw new Error(res.status);
   const j = await res.json();
   return (j.observations || []).filter(o => o.value !== '.');
 }
@@ -326,18 +261,40 @@ async function fetchFredData() {
   } catch (_) {}
 }
 
+function applyOHLC(arr, idx, d) {
+  if (!d?.c) return;
+  const pct = d.o > 0 ? ((d.c - d.o) / d.o) * 100 : 0;
+  arr[idx].price  = d.c;
+  arr[idx].change = +(d.c - d.o).toFixed(2);
+  arr[idx].pct    = +pct.toFixed(2);
+}
+
 async function fetchLiveMarketData() {
-  let hits = 0;
-  // TAIEX 加權指數 via TWSE OpenAPI (no key needed)
-  if (await fetchTaiexFromTWSE()) hits++;
-  // S&P / NASDAQ / DJI / VIX / Brent / Gold / USD-TWD in one Twelve Data batch
-  if (cfg('TWELVE_DATA_API_KEY')) {
-    const allSyms = [...TD_INDEX_SYMBOLS, ...TD_COMMODITY_SYMBOLS];
-    const quotes = await fetchTwelveDataBatch(allSyms);
-    TD_INDEX_SYMBOLS.forEach((s, i) => { if (applyTwelveDataQuote(INDICES, i, quotes[s])) hits++; });
-    TD_COMMODITY_SYMBOLS.forEach((s, i) => { if (applyTwelveDataQuote(COMMODITIES, i, quotes[s])) hits++; });
+  const hits = [];
+
+  if (cfg('POLYGON_API_KEY')) {
+    await Promise.allSettled([
+      fetchPolygonPrev('I:SPX'   ).then(d => { applyOHLC(INDICES,     0, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('I:NDX'   ).then(d => { applyOHLC(INDICES,     1, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('I:DJI'   ).then(d => { applyOHLC(INDICES,     2, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('C:BRTUSD').then(d => { applyOHLC(COMMODITIES, 0, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('C:XAUUSD').then(d => { applyOHLC(COMMODITIES, 1, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('I:VIX'   ).then(d => { applyOHLC(COMMODITIES, 2, d); if (d) hits.push(1); }).catch(() => {}),
+      fetchPolygonPrev('C:USDTWD').then(d => { applyOHLC(COMMODITIES, 3, d); if (d) hits.push(1); }).catch(() => {}),
+    ]);
   }
-  if (hits) LIVE_SOURCES.market = true;
+
+  if (cfg('FUGLE_API_KEY')) {
+    await fetchFugleQuote('TWSE').then(d => {
+      if (!d) return;
+      INDICES[3].price  = d.closePrice ?? d.lastPrice ?? INDICES[3].price;
+      INDICES[3].change = d.change ?? INDICES[3].change;
+      INDICES[3].pct    = d.changePercent ?? INDICES[3].pct;
+      hits.push(1);
+    }).catch(() => {});
+  }
+
+  if (hits.length) LIVE_SOURCES.market = true;
 }
 
 function detectAIBrand(source, title) {
@@ -364,14 +321,8 @@ function relativeDate(dateStr) {
   return `${Math.floor(d / 365)}年前`;
 }
 
-// All three GNews calls share the same daily quota (free tier = 100/day).
-// Once one returns 429, the others will too — share a single fail-cache key
-// so a single 429 silences all GNews calls until the quota resets.
-const GNEWS_QUOTA_FAIL_KEY = 'gnews_quota';
-
 async function fetchAIFrontierNews() {
   if (!cfg('GNEWS_API_KEY')) return;
-  if (isFailedRecently(GNEWS_QUOTA_FAIL_KEY)) return;
 
   try {
     const cached = localStorage.getItem(AI_NEWS_CACHE_KEY);
@@ -392,7 +343,6 @@ async function fetchAIFrontierNews() {
     const q = encodeURIComponent('Anthropic OR OpenAI OR ChatGPT OR "Google DeepMind" OR Gemini OR Claude OR "Meta AI" OR Llama OR xAI OR Grok OR Mistral');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (res.status === 429) { markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT); return; }
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
     // Defensive: drop any articles older than 60 days even if API returned them
@@ -416,13 +366,10 @@ async function fetchAIFrontierNews() {
       AI_FRONTIER.push(...items);
       LIVE_SOURCES.aiFrontier = true;
     }
-  } catch (_) {
-    // CORS-blocked 429s land here without a visible status — assume quota
-    markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT);
-  }
+  } catch (_) {}
 }
 
-const GEO_NEWS_CACHE_KEY = 'geo_news_v3';
+const GEO_NEWS_CACHE_KEY = 'geo_news_v2';
 const GEO_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
 
 function detectGeoTopic(title) {
@@ -432,34 +379,8 @@ function detectGeoTopic(title) {
   return null;
 }
 
-// Heuristic: classify a geopolitical/Trump headline as bullish / bearish for
-// risk assets. Bear signals (escalation / tariffs / rate hikes) take priority
-// over bull signals when both are present.
-function detectImpact(title) {
-  const t = title.toLowerCase();
-  const bearPats = [
-    /tariff/, /sanction/, /\bwar\b/, /conflict/, /escalat/, /threat/, /\battack/,
-    /\bstrike\b/, /deploy.*(troop|carrier|missile|forces)/, /\bban\b/, /restrict/,
-    /crisis/, /recession/, /rate hike/, /raises rate/, /hike rates/, /invasion/,
-    /retaliat/, /cyber.*attack/, /shut down/, /reject/, /stall/, /collapse/,
-    /high alert/, /military/,
-  ];
-  const bullPats = [
-    /rate cut/, /cuts? rates?/, /\bease\b/, /easing/, /\bdeal\b/, /agreement/,
-    /ceasefire/, /\bpeace\b/, /\bsettle/, /lift sanction/, /recovery/,
-    /talks resume/, /deescalat/, /de-escalat/, /\btruce\b/, /breakthrough/,
-    /accord/, /resumes? trade/,
-  ];
-  if (bearPats.some(p => p.test(t))) return 'bear';
-  if (bullPats.some(p => p.test(t))) return 'bull';
-  return 'neutral';
-}
-
-const IMPACT_LABEL = { bull: '利多', bear: '利空', neutral: '中性' };
-
 async function fetchGeoNews() {
   if (!cfg('GNEWS_API_KEY')) return;
-  if (isFailedRecently(GNEWS_QUOTA_FAIL_KEY)) return;
 
   try {
     const cached = localStorage.getItem(GEO_NEWS_CACHE_KEY);
@@ -479,7 +400,6 @@ async function fetchGeoNews() {
     const q = encodeURIComponent('Trump OR Iran OR "Middle East" OR "US Iran"');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=20&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (res.status === 429) { markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT); return; }
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
@@ -488,7 +408,7 @@ async function fetchGeoNews() {
       if (!a.title || !a.url || !a.publishedAt) continue;
       const cat = detectGeoTopic(a.title);
       if (!cat) continue;
-      items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url, impact: detectImpact(a.title) });
+      items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url });
       if (items.length >= 5) break;
     }
 
@@ -498,9 +418,7 @@ async function fetchGeoNews() {
       GEO_NEWS.push(...items);
       LIVE_SOURCES.geoNews = true;
     }
-  } catch (_) {
-    markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT);
-  }
+  } catch (_) {}
 }
 
 const MARKET_NEWS_CACHE_KEY = 'market_news_v1';
@@ -517,7 +435,6 @@ function categorizeMarketNews(title, source) {
 
 async function fetchMarketNews() {
   if (!cfg('GNEWS_API_KEY')) return;
-  if (isFailedRecently(GNEWS_QUOTA_FAIL_KEY)) return;
 
   try {
     const cached = localStorage.getItem(MARKET_NEWS_CACHE_KEY);
@@ -536,7 +453,6 @@ async function fetchMarketNews() {
     const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve"');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=10&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (res.status === 429) { markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT); return; }
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
@@ -554,35 +470,21 @@ async function fetchMarketNews() {
       NEWS.push(...items);
       LIVE_SOURCES.marketNews = true;
     }
-  } catch (_) {
-    markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT);
-  }
+  } catch (_) {}
 }
 
 async function fetchAndUpdateLiveData() {
   const tasks = [];
 
-  if (cfg('TWELVE_DATA_API_KEY')) {
-    // Twelve Data free tier: 8 credits/min — cap watchlist to 8 symbols and
-    // fetch them all in a single batch HTTP call. Dedupe to handle config
-    // typos like duplicate VRT.
-    const rawSyms = CONFIG.WATCHLIST_US ?? ['AAPL', 'NVDA', 'MSFT', 'META'];
-    const syms = [...new Set(rawSyms)].slice(0, 8);
+  if (cfg('POLYGON_API_KEY')) {
+    const syms = CONFIG.WATCHLIST_US ?? ['AAPL', 'NVDA', 'MSFT', 'META'];
     tasks.push(
-      fetchTwelveDataBatch(syms).then(quotes => {
-        const live = syms.map(s => {
-          const q = quotes[s];
-          if (!q || q.code) return null;
-          const close = parseFloat(q.close);
-          if (!isFinite(close)) return null;
-          return {
-            name: US_NAMES[s] || q.name || s,
-            symbol: s,
-            price: close,
-            change: +(parseFloat(q.change || 0)).toFixed(2),
-            pct:    +(parseFloat(q.percent_change || 0)).toFixed(2),
-            market: 'US',
-          };
+      Promise.allSettled(syms.map(s => fetchPolygonPrev(s))).then(results => {
+        const live = results.map((r, i) => {
+          if (r.status !== 'fulfilled' || !r.value) return null;
+          const d = r.value;
+          const pct = d.o > 0 ? ((d.c - d.o) / d.o) * 100 : 0;
+          return { name: US_NAMES[syms[i]] || syms[i], symbol: syms[i], price: d.c, change: +(d.c - d.o).toFixed(2), pct: +pct.toFixed(2), market: 'US' };
         }).filter(Boolean);
         if (live.length) {
           const twOnly = WATCHLIST.filter(w => w.market === 'TW');
@@ -595,8 +497,7 @@ async function fetchAndUpdateLiveData() {
   }
 
   if (cfg('FUGLE_API_KEY')) {
-    const rawSyms = CONFIG.WATCHLIST_TW ?? ['2330', '2317', '2454', '2382'];
-    const syms = [...new Set(rawSyms)].slice(0, 8);
+    const syms = CONFIG.WATCHLIST_TW ?? ['2330', '2317', '2454', '2382'];
     tasks.push(
       Promise.allSettled(syms.map(s => fetchFugleQuote(s))).then(results => {
         const live = results.map((r, i) => {
@@ -646,30 +547,137 @@ function now() {
   return new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
 }
 
+// ── Visual helpers (Pulse design) ─────────────────────────────────────────
+
+// Deterministic sparkline path so each symbol has stable but varied micro-chart.
+// Real OHLC data isn't fetched yet; this is decorative until we add it.
+function synthSparkline(symbol, isUp) {
+  let seed = 0;
+  for (let i = 0; i < symbol.length; i++) seed = (seed * 31 + symbol.charCodeAt(i)) % 233280;
+  const pts = [];
+  let v = 14;
+  for (let i = 0; i <= 7; i++) {
+    seed = (seed * 9301 + 49297) % 233280;
+    const r = (seed / 233280 - 0.5) * 6;
+    v = Math.max(2, Math.min(20, v + r + (isUp ? -0.9 : 0.9)));
+    pts.push(`${i * 8.5},${v.toFixed(1)}`);
+  }
+  const stroke = isUp ? '#34d399' : '#fb7185';
+  return `<svg class="sparkline" viewBox="0 0 60 22" aria-hidden="true">
+    <path d="M${pts.join(' L')}" fill="none" stroke="${stroke}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+const COMMODITY_ICON_CLASS = { BRT: 'oil', GC: 'gold', VIX: 'vix', USDTWD: 'fx' };
+
+function calcSentiment() {
+  const ups = INDICES.filter(i => i.pct > 0).length;
+  const totalPct = INDICES.reduce((s, i) => s + (i.pct || 0), 0);
+  const score = 50 + ups * 5 + totalPct * 4;
+  return Math.max(5, Math.min(95, Math.round(score)));
+}
+
+function renderHero() {
+  const ups = INDICES.filter(i => i.pct > 0).length;
+  const downs = INDICES.filter(i => i.pct < 0).length;
+  const score = calcSentiment();
+
+  let moodClass, moodLabel, moodText, headlineEm, headlineEmClass = '';
+  if (score >= 65) {
+    moodClass = ''; moodLabel = 'RISK ON · 偏多';
+    headlineEm = ups === INDICES.length ? '四大指數齊揚' : `${ups} / ${INDICES.length} 指數上漲`;
+    moodText = '資金延續流入風險資產，留意 FOMC 與通膨數據';
+  } else if (score >= 40) {
+    moodClass = 'warn'; moodLabel = 'NEUTRAL · 中性';
+    headlineEm = `${ups} 漲 / ${downs} 跌`;
+    moodText = '指數震盪整理，等待明確方向訊號';
+  } else {
+    moodClass = 'down'; moodLabel = 'RISK OFF · 偏空';
+    headlineEm = `${downs} 指數承壓`; headlineEmClass = ' down';
+    moodText = '避險情緒升溫，留意風險控管與波動';
+  }
+
+  const d = new Date();
+  const time = `${String(d.getMonth()+1).padStart(2,'0')} / ${String(d.getDate()).padStart(2,'0')} · ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+
+  const cells = INDICES.map(i => {
+    const cls = i.pct >= 0 ? 'up' : 'down';
+    const sign = i.pct >= 0 ? '+' : '';
+    const shortName = ({ 'S&P 500': 'S&P', 'NASDAQ': 'NDX', '道瓊指數': 'DJI', '台股加權': 'TWSE' })[i.name] || i.symbol;
+    return `<div class="hero-cell">
+      <div class="lbl">${shortName}</div>
+      <div class="val">${fmtPrice(i.price)}</div>
+      <div class="chg ${cls}">${sign}${i.pct.toFixed(2)}%</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="hero">
+    <div class="hero-head">
+      <div class="hero-eyebrow">市場脈搏</div>
+      <div class="hero-time">${time} TWN</div>
+    </div>
+    <div class="hero-headline">市況一覽，<em class="${headlineEmClass.trim()}">${headlineEm}</em></div>
+    <div class="hero-sub">綜合台美股動能、原物料與避險指標，估算當前市場情緒</div>
+    <div class="hero-mood">
+      <div class="mood-orb ${moodClass}"></div>
+      <div class="mood-info">
+        <div class="mood-label">${moodLabel}</div>
+        <div class="mood-text">${moodText}</div>
+      </div>
+      <div class="mood-score ${moodClass}">
+        <div class="mood-score-num">${score}</div>
+        <div class="mood-score-lbl">SENTIMENT</div>
+      </div>
+    </div>
+    <div class="hero-grid">${cells}</div>
+  </div>`;
+}
+
 // ── Render: Overview ──────────────────────────────────────────────────────
 
 function renderOverview() {
-  const indices = INDICES.map(d => `
-    <div class="price-cell">
-      <div class="label">${d.name}</div>
-      <div class="value">${fmtPrice(d.price)}</div>
-      <div class="change">${fmtChange(d.pct, d.change)}</div>
-    </div>`).join('');
+  const indices = INDICES.map(d => {
+    const cls = d.pct >= 0 ? 'up' : 'down';
+    const sign = d.pct >= 0 ? '+' : '';
+    const arrow = d.pct >= 0
+      ? `<svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M6 2L11 8H1Z"/></svg>`
+      : `<svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M6 10L1 4H11Z"/></svg>`;
+    return `
+    <div class="index-tile ${cls}">
+      <div class="index-row">
+        <div>
+          <div class="index-name">${d.name}</div>
+          <div class="index-sym">${d.symbol}</div>
+        </div>
+        ${synthSparkline(d.symbol, d.pct >= 0)}
+      </div>
+      <div class="index-val">${fmtPrice(d.price)}</div>
+      <div class="index-chg-row">
+        <span class="chg-pill ${cls}">${arrow} ${sign}${d.pct.toFixed(2)}%</span>
+        <span class="chg-abs">${sign}${d.change.toFixed(2)}</span>
+      </div>
+    </div>`;
+  }).join('');
 
-  const commodities = COMMODITIES.map(d => `
+  const commodities = COMMODITIES.map(d => {
+    const iconCls = COMMODITY_ICON_CLASS[d.symbol] || '';
+    const cls = d.change >= 0 ? 'up' : 'down';
+    const sign = d.change >= 0 ? '+' : '';
+    return `
     <div class="commodity-row">
       <div class="commodity-left">
-        <div class="commodity-icon">${d.icon}</div>
+        <div class="commodity-icon ${iconCls}">${d.icon}</div>
         <div>
           <div class="commodity-name">${d.name}</div>
-          ${d.unit ? `<div class="commodity-unit">${d.unit}</div>` : ''}
+          ${d.unit ? `<div class="commodity-unit">${d.unit} · ${d.symbol}</div>` : `<div class="commodity-unit">${d.symbol}</div>`}
         </div>
       </div>
       <div class="commodity-right">
-        <div class="commodity-price ${d.change >= 0 ? 'up' : 'down'}">${fmtPrice(d.price)}</div>
-        <div class="commodity-change ${d.change >= 0 ? 'up' : 'down'}">${d.change >= 0 ? '+' : ''}${d.pct.toFixed(2)}%</div>
+        <div class="commodity-price ${cls}">${fmtPrice(d.price)}</div>
+        <span class="chg-pill ${cls}">${sign}${d.pct.toFixed(2)}%</span>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   const geoSlice = GEO_NEWS.slice(0, 5);
   const geoRows = geoSlice.map((g, i) => {
@@ -677,10 +685,8 @@ function renderOverview() {
     const href = g.url ? ` href="${g.url}" target="_blank" rel="noopener"` : '';
     const style = i >= 3 ? ' style="display:none"' : '';
     const displayDate = /^\d{4}-\d{2}-\d{2}/.test(g.date) ? relativeDate(g.date) : g.date;
-    const impact = g.impact || 'neutral';
-    const impactBadge = `<span class="impact-badge impact-${impact}">${IMPACT_LABEL[impact]}</span>`;
     return `<${tag} class="news-item"${href}${style}>
-      <div><span class="news-tag tag-${g.topic}">${g.icon} ${g.label}</span>${impactBadge}</div>
+      <div><span class="news-tag tag-${g.topic}">${g.icon} ${g.label}</span></div>
       <div class="news-headline">${g.headline}</div>
       <div class="news-meta">${g.src} · ${displayDate}</div>
     </${tag}>`;
@@ -749,41 +755,69 @@ function renderOverview() {
   }).join('');
 
   const liveItems = [
-    LIVE_SOURCES.watchlist  && '自選股（Twelve Data / Fugle）',
-    LIVE_SOURCES.market     && '指數 & 原物料（Twelve Data + TWSE）',
-    LIVE_SOURCES.fed        && '總經指標（FRED）',
-    LIVE_SOURCES.aiFrontier && 'AI前沿消息（GNews）',
-    LIVE_SOURCES.geoNews    && '地緣政治（GNews）',
-    LIVE_SOURCES.marketNews && '市場新聞（GNews）',
+    LIVE_SOURCES.watchlist  && '自選股',
+    LIVE_SOURCES.market     && '指數 & 原物料',
+    LIVE_SOURCES.fed        && '總經指標',
+    LIVE_SOURCES.aiFrontier && 'AI 前沿',
+    LIVE_SOURCES.geoNews    && '地緣政治',
+    LIVE_SOURCES.marketNews && '市場新聞',
   ].filter(Boolean);
+  const checkSvg = `<svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>`;
+  const radioSvg = `<svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12a10 10 0 0 1 4-8M22 12a10 10 0 0 0-4-8M5 12a7 7 0 0 1 3-5.7M19 12a7 7 0 0 0-3-5.7"/><circle cx="12" cy="12" r="2"/></svg>`;
   const liveBanner = liveItems.length
-    ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時資料：${liveItems.join('、')}</div>`
-    : `<div class="info-banner">📡 模擬資料 — 在 <strong>config.js</strong> 填入 API Key 可取得即時報價與總經數據</div>`;
+    ? `<div class="banner live">${checkSvg}<span><b>即時資料</b> · ${liveItems.join('、')}</span></div>`
+    : `<div class="banner">${radioSvg}<span><b>模擬資料</b> · 在 config.js 填入 API Key 可取得即時報價與總經數據</span></div>`;
 
   return `
+    ${renderHero()}
     ${liveBanner}
-    <div class="card">
-      <div class="card-title"><span class="dot"></span>主要指數</div>
-      <div class="price-grid">${indices}</div>
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">主要指數</div>
+        <div class="sec-meta">收盤後延遲 15 分鐘</div>
+      </div>
+      <div class="card">
+        <div class="price-grid">${indices}</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--blue)"></span>聯準會 & 總經指標</div>
-      ${fedRateBox}
-      ${fedIndRows}
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">聯準會 &amp; 總經指標</div>
+        <div class="sec-meta">FRED · CME FedWatch</div>
+      </div>
+      <div class="card">
+        ${fedRateBox}
+        ${fedIndRows}
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--yellow)"></span>原物料 & 避險指標</div>
-      ${commodities}
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">原物料 &amp; 避險指標</div>
+        <div class="sec-meta">USD denominated</div>
+      </div>
+      <div class="card">
+        ${commodities}
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--red)"></span>地緣政治 & 川普言論</div>
-      <div class="expandable">${geoRows}</div>
-      ${geoBtn}
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">地緣政治 &amp; 川普言論</div>
+        <div class="sec-meta">${LIVE_SOURCES.geoNews ? 'GNews · 即時' : '模擬'}</div>
+      </div>
+      <div class="card">
+        <div class="expandable">${geoRows}</div>
+        ${geoBtn}
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--green)"></span>今日快訊</div>
-      <div class="expandable">${topNews}</div>
-      ${newsBtn}
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">今日快訊</div>
+        <div class="sec-meta">${LIVE_SOURCES.marketNews ? 'GNews · 即時' : '模擬'}</div>
+      </div>
+      <div class="card">
+        <div class="expandable">${topNews}</div>
+        ${newsBtn}
+      </div>
     </div>`;
 }
 
@@ -827,33 +861,57 @@ function renderNews() {
     </div>`).join('');
 
   return `
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--purple)"></span>自選股動態</div>
-      <div class="price-grid">${watchItems}</div>
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">自選股動態</div>
+        <div class="sec-meta">${LIVE_SOURCES.watchlist ? '即時' : '模擬'}</div>
+      </div>
+      <div class="card">
+        <div class="price-grid">${watchItems}</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--orange)"></span>財報行事曆</div>
-      ${earnings}
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">財報行事曆</div>
+        <div class="sec-meta">本週 / 下週</div>
+      </div>
+      <div class="card">
+        ${earnings}
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--green)"></span>市場要聞</div>
-      <div class="expandable">${allNews}</div>
-      ${allNewsBtn}
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">市場要聞</div>
+        <div class="sec-meta">${LIVE_SOURCES.marketNews ? 'GNews · 即時' : '模擬'}</div>
+      </div>
+      <div class="card">
+        <div class="expandable">${allNews}</div>
+        ${allNewsBtn}
+      </div>
     </div>`;
 }
 
 // ── Render: Cycle ─────────────────────────────────────────────────────────
 
 function renderCycle() {
-  // ML Clock SVG
-  const cx = 110, cy = 110, r = 90;
+  // ML Clock SVG (Pulse design: gradient quadrants + glass hub)
+  const cx = 115, cy = 115, r = 100;
   const phases = [
-    { label: '復甦', color: '#3fb950', assets: '股票↑' },
-    { label: '擴張', color: '#f0883e', assets: '原物料↑' },
-    { label: '過熱', color: '#f85149', assets: '債券↑' },
-    { label: '衰退', color: '#8b949e', assets: '現金↑' },
+    { label: '復甦', color: '#34d399', assets: '股票↑', gradId: 'qg1' },
+    { label: '擴張', color: '#fb923c', assets: '原物料↑', gradId: 'qg2' },
+    { label: '過熱', color: '#fb7185', assets: '債券↑', gradId: 'qg3' },
+    { label: '衰退', color: '#7e88a3', assets: '現金↑', gradId: 'qg4' },
   ];
-  // Draw 4 arcs (quadrants): 12→3, 3→6, 6→9, 9→12 = -90→0→90→180→270
+  const defs = `<defs>
+    ${phases.map(p => `<linearGradient id="${p.gradId}" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="${p.color}" stop-opacity=".22"/>
+      <stop offset="100%" stop-color="${p.color}" stop-opacity=".05"/>
+    </linearGradient>`).join('')}
+    <radialGradient id="hubGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#6c8bff"/>
+    </radialGradient>
+  </defs>`;
   const phaseArcs = phases.map((p, i) => {
     const startDeg = -90 + i * 90;
     const endDeg   = startDeg + 90;
@@ -863,75 +921,81 @@ function renderCycle() {
     const x2 = cx + r * Math.cos(e), y2 = cy + r * Math.sin(e);
     const lx = cx + (r * 0.62) * Math.cos((s + e) / 2);
     const ly = cy + (r * 0.62) * Math.sin((s + e) / 2);
-    const lx2 = cx + (r * 0.72) * Math.cos((s + e) / 2);
-    const ly2 = cy + (r * 0.76) * Math.sin((s + e) / 2);
     return `
       <path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 0,1 ${x2},${y2} Z"
-            fill="${p.color}" fill-opacity="0.15" stroke="${p.color}" stroke-opacity="0.4" stroke-width="1"/>
+            fill="url(#${p.gradId})" stroke="${p.color}" stroke-opacity="0.45" stroke-width="1"/>
       <text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle"
-            font-size="12" font-weight="800" fill="${p.color}">${p.label}</text>
-      <text x="${lx2}" y="${ly2 + 14}" text-anchor="middle" dominant-baseline="middle"
-            font-size="9" fill="${p.color}" opacity="0.8">${p.assets}</text>`;
+            font-size="13" font-weight="800" fill="${p.color}">${p.label}</text>
+      <text x="${lx}" y="${ly + 16}" text-anchor="middle" dominant-baseline="middle"
+            font-size="9" fill="${p.color}" opacity="0.75">${p.assets}</text>`;
   }).join('');
 
-  // Clock hand (needle) — current position ~45° from recovery start (between recovery and expansion)
   const needleDeg = (-90 + ML_CLOCK_POSITION * 90) * Math.PI / 180;
   const nx = cx + (r * 0.75) * Math.cos(needleDeg);
   const ny = cy + (r * 0.75) * Math.sin(needleDeg);
 
-  // Clock ticks
-  const ticks = Array.from({ length: 12 }, (_, i) => {
-    const a = (-90 + i * 30) * Math.PI / 180;
-    const r1 = 86, r2 = 92;
+  const ticks = [0, 90, 180, 270].map(deg => {
+    const a = (deg - 90) * Math.PI / 180;
+    const r1 = r - 8, r2 = r + 2;
     return `<line x1="${cx + r1 * Math.cos(a)}" y1="${cy + r1 * Math.sin(a)}"
                   x2="${cx + r2 * Math.cos(a)}" y2="${cy + r2 * Math.sin(a)}"
-                  stroke="#30363d" stroke-width="2"/>`;
+                  stroke="#4b556e" stroke-width="2"/>`;
   }).join('');
 
   const clockSvg = `
-    <svg viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 230 230" xmlns="http://www.w3.org/2000/svg">
+      ${defs}
       ${phaseArcs}
       ${ticks}
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#30363d" stroke-width="1.5"/>
-      <circle cx="${cx}" cy="${cy}" r="6" fill="#8b949e"/>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="1.5"/>
       <line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}"
-            stroke="#58a6ff" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="${nx}" cy="${ny}" r="4" fill="#58a6ff"/>
+            stroke="url(#hubGrad)" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="${nx}" cy="${ny}" r="5" fill="#22d3ee"/>
+      <circle cx="${nx}" cy="${ny}" r="9" fill="#22d3ee" opacity="0.25"/>
+      <circle cx="${cx}" cy="${cy}" r="8" fill="url(#hubGrad)"/>
+      <circle cx="${cx}" cy="${cy}" r="3" fill="#06080f"/>
     </svg>`;
 
   const mlLegend = phases.map(p => `
     <div class="ml-legend-item">
-      <div class="ml-dot" style="background:${p.color}"></div>
+      <div class="ml-dot" style="background:${p.color};color:${p.color}"></div>
       <div>
         <div class="phase-name" style="color:${p.color}">${p.label}</div>
         <div class="phase-assets">${p.assets} 表現最佳</div>
       </div>
     </div>`).join('');
 
-  // Heat gauge SVG (semi-circle)
+  // Heat gauge SVG (Pulse design: gradient stroke + colored needle)
   const heatScore = 58; // 0-100, current moderate-warm
-  const heatColor = heatScore > 75 ? '#f85149' : heatScore > 50 ? '#d29922' : '#3fb950';
-  const heatLabel = heatScore > 75 ? '偏熱' : heatScore > 50 ? '中性偏暖' : '正常';
-  // Semi-circle: from 180° to 0° (left to right) = -180 to 0
-  const heatAngle = -180 + (heatScore / 100) * 180;
-  const ha = heatAngle * Math.PI / 180;
-  const gx = 100, gy = 95, gr = 75;
-  const nsx = gx + gr * Math.cos(ha);
-  const nsy = gy + gr * Math.sin(ha);
+  const heatColor = heatScore > 75 ? '#fb7185' : heatScore > 50 ? '#fbbf24' : '#34d399';
+  const heatGrad  = heatScore > 75 ? 'linear-gradient(135deg,#fb7185,#f97316)'
+                  : heatScore > 50 ? 'linear-gradient(135deg,#fbbf24,#fb923c)'
+                  : 'linear-gradient(135deg,#34d399,#06b6d4)';
+  const heatLabel = heatScore > 75 ? '偏熱 — 留意散戶情緒過熱風險' : heatScore > 50 ? '中性偏暖 — 多空均衡略偏多' : '正常 — 風險溢酬合理';
+  // Needle angle in degrees (relative to vertical), from -90 (left) to 90 (right)
+  const needleRotateDeg = -90 + (heatScore / 100) * 180;
+  const gx = 110, gy = 100, gr = 85;
 
   const gaugeSvg = `
-    <svg viewBox="0 0 200 105" xmlns="http://www.w3.org/2000/svg">
+    <svg viewBox="0 0 220 120" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%"   stop-color="#3fb950"/>
-          <stop offset="50%"  stop-color="#d29922"/>
-          <stop offset="100%" stop-color="#f85149"/>
+          <stop offset="0%"   stop-color="#34d399"/>
+          <stop offset="50%"  stop-color="#fbbf24"/>
+          <stop offset="100%" stop-color="#fb7185"/>
+        </linearGradient>
+        <linearGradient id="needleGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%"   stop-color="${heatColor}" stop-opacity=".4"/>
+          <stop offset="100%" stop-color="${heatColor}"/>
         </linearGradient>
       </defs>
-      <path d="M ${gx - gr} ${gy} A ${gr} ${gr} 0 0 1 ${gx + gr} ${gy}" fill="none" stroke="#30363d" stroke-width="12" stroke-linecap="round"/>
-      <path d="M ${gx - gr} ${gy} A ${gr} ${gr} 0 0 1 ${gx + gr} ${gy}" fill="none" stroke="url(#gaugeGrad)" stroke-width="12" stroke-linecap="round" opacity="0.7"/>
-      <line x1="${gx}" y1="${gy}" x2="${nsx}" y2="${nsy}" stroke="${heatColor}" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="${gx}" cy="${gy}" r="5" fill="${heatColor}"/>
+      <path d="M ${gx - gr} ${gy} A ${gr} ${gr} 0 0 1 ${gx + gr} ${gy}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="14" stroke-linecap="round"/>
+      <path d="M ${gx - gr} ${gy} A ${gr} ${gr} 0 0 1 ${gx + gr} ${gy}" fill="none" stroke="url(#gaugeGrad)" stroke-width="14" stroke-linecap="round" opacity="0.85"/>
+      <g transform="rotate(${needleRotateDeg.toFixed(1)}, ${gx}, ${gy})">
+        <line x1="${gx}" y1="${gy}" x2="${gx}" y2="${gy - gr + 8}" stroke="url(#needleGrad)" stroke-width="3.5" stroke-linecap="round"/>
+        <circle cx="${gx}" cy="${gy - gr + 8}" r="5" fill="${heatColor}"/>
+      </g>
+      <circle cx="${gx}" cy="${gy}" r="9" fill="#0f1424" stroke="${heatColor}" stroke-width="2.5"/>
     </svg>`;
 
   const retailRows = Object.values(RETAIL_DATA).map(d => `
@@ -958,31 +1022,51 @@ function renderCycle() {
     </div>`).join('');
 
   return `
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--orange)"></span>美林投資時鐘</div>
-      <div class="ml-clock-wrap">
-        <div class="ml-clock-svg-wrap">${clockSvg}</div>
-        <div class="ml-current-label">📍 目前位置：<strong>復甦 → 擴張過渡期</strong>（股票 & 原物料輪動）</div>
-        <div class="ml-legend">${mlLegend}</div>
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">美林投資時鐘</div>
+        <div class="sec-meta">資產輪動定位</div>
+      </div>
+      <div class="card">
+        <div class="ml-clock-wrap">
+          <div class="ml-clock-svg-wrap">${clockSvg}</div>
+          <div class="ml-current-label">📍 目前位置：<strong>復甦 → 擴張過渡期</strong></div>
+          <div class="ml-legend">${mlLegend}</div>
+        </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--red)"></span>市場熱度計</div>
-      <div class="gauge-wrap">
-        <div class="gauge-svg-wrap">${gaugeSvg}</div>
-        <div class="gauge-labels"><span>冷</span><span>正常</span><span>過熱</span></div>
-        <div class="gauge-value-label" style="color:${heatColor}">${heatScore} / 100</div>
-        <div class="gauge-sublabel">${heatLabel} — 台美股合成熱度指數</div>
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">市場熱度計</div>
+        <div class="sec-meta">台美股合成指數</div>
+      </div>
+      <div class="card">
+        <div class="gauge-wrap">
+          <div class="gauge-svg-wrap">${gaugeSvg}</div>
+          <div class="gauge-labels"><span>冷</span><span>正常</span><span>過熱</span></div>
+          <div class="gauge-value-label" style="background:${heatGrad};-webkit-background-clip:text;background-clip:text;color:transparent">${heatScore}</div>
+          <div class="gauge-sublabel">${heatLabel}</div>
+        </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--blue)"></span>台股散戶指標</div>
-      <div class="warn-banner">⚠️ 融資餘額偏高 + 成交量放大，需留意散戶過度樂觀風險</div>
-      <div class="retail-grid">${retailRows}</div>
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">台股散戶指標</div>
+        <div class="sec-meta">融資 / 融券 / 成交量</div>
+      </div>
+      <div class="card">
+        <div class="warn-banner">⚠️ 融資餘額偏高 + 成交量放大，需留意散戶過度樂觀風險</div>
+        <div class="retail-grid">${retailRows}</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--purple)"></span>台美股週期分析</div>
-      <div class="cycle-info">${cycleRows}</div>
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">台美股週期分析</div>
+        <div class="sec-meta">未來 6–12 個月觀察</div>
+      </div>
+      <div class="card">
+        <div class="cycle-info">${cycleRows}</div>
+      </div>
     </div>`;
 }
 
@@ -1047,20 +1131,25 @@ function renderAI() {
   }).join('');
   const frontierBtn = frontierSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${frontierSlice.length})">展開全部 ${frontierSlice.length} 筆 ▼</button>` : '';
 
-  const aiBanner = LIVE_SOURCES.aiFrontier
-    ? `<div class="info-banner" style="background:var(--green-bg);border-color:rgba(63,185,80,.3);color:var(--green)">✅ 即時新聞（GNews）· 每30分鐘更新</div>`
-    : '';
-
   return `
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--purple)"></span>AI產業輪動時間軸</div>
-      <div class="ai-timeline">${phases}</div>
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">AI 產業輪動</div>
+        <div class="sec-meta">2022 → 現在</div>
+      </div>
+      <div class="card">
+        <div class="ai-timeline">${phases}</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--blue)"></span>AI前沿消息</div>
-      ${aiBanner}
-      <div class="expandable">${frontier}</div>
-      ${frontierBtn}
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">AI 前沿消息</div>
+        <div class="sec-meta">${LIVE_SOURCES.aiFrontier ? 'GNews · 每 30 分鐘更新' : '模擬'}</div>
+      </div>
+      <div class="card">
+        <div class="expandable">${frontier}</div>
+        ${frontierBtn}
+      </div>
     </div>`;
 }
 
@@ -1082,14 +1171,24 @@ function renderDiscover() {
     </div>`).join('');
 
   return `
-    <div class="card">
-      <div class="card-title"><span class="dot" style="background:var(--green)"></span>台股本益比 & 成長潛力</div>
-      <div class="info-banner">📊 以AI/科技供應鏈為主軸，本益比資料為模擬值，請以實際財報為準</div>
-      ${twStocks}
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">台股本益比 &amp; 成長潛力</div>
+        <div class="sec-meta">AI / 科技供應鏈</div>
+      </div>
+      <div class="card">
+        <div class="info-banner">📊 以 AI / 科技供應鏈為主軸，本益比資料為模擬值，請以實際財報為準</div>
+        ${twStocks}
+      </div>
     </div>
-    <div class="card" id="github-card">
-      <div class="card-title"><span class="dot" style="background:var(--purple)"></span>GitHub 本週熱門 Top 10</div>
-      <div id="github-list"><div class="gh-loading">⏳ 載入中...</div></div>
+    <div class="section">
+      <div class="sec-head">
+        <div class="sec-title">GitHub 本週熱門 Top 10</div>
+        <div class="sec-meta">過去 7 天 stars</div>
+      </div>
+      <div class="card" id="github-card">
+        <div id="github-list"><div class="gh-loading">⏳ 載入中...</div></div>
+      </div>
     </div>`;
 }
 
@@ -1157,12 +1256,20 @@ function renderGitHubItems(items) {
 
 // ── Tab system ────────────────────────────────────────────────────────────
 
+const NAV_ICONS = {
+  overview: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>`,
+  news:     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v16a2 2 0 0 1-2 2 2 2 0 0 1-2-2V11h4"/><path d="M18 14h-8M15 18h-5M10 6h8v4h-8z"/></svg>`,
+  cycle:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>`,
+  ai:       `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v1H7a3 3 0 0 0-3 3v1H3a3 3 0 0 0 0 6h1v1a3 3 0 0 0 3 3h2v1a3 3 0 0 0 6 0v-1h2a3 3 0 0 0 3-3v-1h1a3 3 0 0 0 0-6h-1V9a3 3 0 0 0-3-3h-2V5a3 3 0 0 0-3-3z"/><circle cx="9" cy="10" r=".5" fill="currentColor"/><circle cx="15" cy="10" r=".5" fill="currentColor"/><path d="M9 14h6"/></svg>`,
+  discover: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>`,
+};
+
 const TABS = [
-  { id: 'overview', label: '總覽',  icon: '📊', render: renderOverview },
-  { id: 'news',     label: '新聞',  icon: '📰', render: renderNews },
-  { id: 'cycle',    label: '週期',  icon: '🔄', render: renderCycle },
-  { id: 'ai',       label: 'AI趨勢',icon: '🤖', render: renderAI },
-  { id: 'discover', label: '精選',  icon: '🔍', render: renderDiscover },
+  { id: 'overview', label: '總覽',   render: renderOverview },
+  { id: 'news',     label: '新聞',   render: renderNews },
+  { id: 'cycle',    label: '週期',   render: renderCycle },
+  { id: 'ai',       label: 'AI 趨勢', render: renderAI },
+  { id: 'discover', label: '精選',   render: renderDiscover },
 ];
 
 let activeTab = 'overview';
@@ -1182,6 +1289,14 @@ function switchTab(id) {
   if (id === 'discover') loadGitHub();
 }
 
+function updateLiveStatus() {
+  const anyLive = Object.values(LIVE_SOURCES).some(Boolean);
+  const pill = document.getElementById('live-pill');
+  if (pill) pill.hidden = !anyLive;
+  const stamp = document.getElementById('last-updated');
+  if (stamp) stamp.textContent = now();
+}
+
 async function refresh() {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spinning');
@@ -1193,8 +1308,7 @@ async function refresh() {
   await fetchAndUpdateLiveData();
   switchTab(activeTab);
   btn.classList.remove('spinning');
-  const anyLive = Object.values(LIVE_SOURCES).some(Boolean);
-  document.getElementById('last-updated').textContent = `${anyLive ? '即時' : '更新'}: ${now()}`;
+  updateLiveStatus();
 }
 
 function toggleExpand(btn, total) {
@@ -1212,8 +1326,8 @@ function toggleExpand(btn, total) {
 function buildNav() {
   const nav = document.getElementById('bottom-nav');
   nav.innerHTML = TABS.map(t => `
-    <button class="nav-btn${t.id === activeTab ? ' active' : ''}" data-tab="${t.id}" onclick="switchTab('${t.id}')">
-      <span class="nav-icon">${t.icon}</span>
+    <button class="nav-btn${t.id === activeTab ? ' active' : ''}" data-tab="${t.id}" onclick="switchTab('${t.id}')" aria-label="${t.label}">
+      <span class="nav-icon">${NAV_ICONS[t.id] || ''}</span>
       <span>${t.label}</span>
     </button>`).join('');
 }
@@ -1227,14 +1341,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   buildNav();
   buildContent();
   switchTab(activeTab);  // 先用 mock 資料渲染，讓畫面立即出現
-  document.getElementById('last-updated').textContent = `更新: ${now()}`;
+  updateLiveStatus();
   document.getElementById('refresh-btn').addEventListener('click', refresh);
 
   // Build version (injected by GitHub Action at deploy time)
   const versionEl = document.getElementById('build-version');
   if (versionEl) {
     const v = (typeof CONFIG !== 'undefined' && CONFIG.BUILD_VERSION) ? CONFIG.BUILD_VERSION : '';
-    versionEl.textContent = v ? `v${v}` : 'dev';
+    versionEl.textContent = v ? `v${v}` : 'DEV';
   }
 
   if ('serviceWorker' in navigator) {
@@ -1245,6 +1359,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   await fetchAndUpdateLiveData();
   if (Object.values(LIVE_SOURCES).some(Boolean)) {
     switchTab(activeTab);
-    document.getElementById('last-updated').textContent = `即時: ${now()}`;
+    updateLiveStatus();
   }
 });
