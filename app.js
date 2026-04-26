@@ -235,13 +235,15 @@ function applyTwelveDataQuote(arr, idx, q) {
   return true;
 }
 
-// TWSE OpenAPI for TAIEX (加權指數) — official, free, no auth, CORS-friendly.
-// Updates after market close so this is end-of-day; intraday quotes would
-// need a different endpoint (mis.twse.com.tw, requires session).
+// TWSE OpenAPI for TAIEX (加權指數) — official, free, no auth, but does NOT
+// send CORS headers, so route through allorigins like FRED. Updates after
+// market close (end-of-day data); intraday would need mis.twse.com.tw.
 async function fetchTaiexFromTWSE() {
   if (isFailedRecently('twse_taiex')) return false;
   try {
-    const res = await fetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', { signal: AbortSignal.timeout(10000) });
+    const target = 'https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX';
+    const url = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(target);
+    const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
     if (!res.ok) { markFailed('twse_taiex', FAIL_TTL_SHORT); return false; }
     const arr = await res.json();
     const taiex = arr.find(r => r.Index === '發行量加權股價指數' || (r.Index || '').includes('加權股價'));
@@ -255,7 +257,10 @@ async function fetchTaiexFromTWSE() {
     INDICES[3].change = +(sign * pts).toFixed(2);
     INDICES[3].pct    = +(sign * pct).toFixed(2);
     return true;
-  } catch (_) { return false; }
+  } catch (_) {
+    markFailed('twse_taiex', FAIL_TTL_SHORT); // proxy/network failure — don't hammer
+    return false;
+  }
 }
 
 async function fetchFugleQuote(symbol) {
@@ -411,7 +416,10 @@ async function fetchAIFrontierNews() {
       AI_FRONTIER.push(...items);
       LIVE_SOURCES.aiFrontier = true;
     }
-  } catch (_) {}
+  } catch (_) {
+    // CORS-blocked 429s land here without a visible status — assume quota
+    markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT);
+  }
 }
 
 const GEO_NEWS_CACHE_KEY = 'geo_news_v3';
@@ -490,7 +498,9 @@ async function fetchGeoNews() {
       GEO_NEWS.push(...items);
       LIVE_SOURCES.geoNews = true;
     }
-  } catch (_) {}
+  } catch (_) {
+    markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT);
+  }
 }
 
 const MARKET_NEWS_CACHE_KEY = 'market_news_v1';
@@ -544,7 +554,9 @@ async function fetchMarketNews() {
       NEWS.push(...items);
       LIVE_SOURCES.marketNews = true;
     }
-  } catch (_) {}
+  } catch (_) {
+    markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT);
+  }
 }
 
 async function fetchAndUpdateLiveData() {
