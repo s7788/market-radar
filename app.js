@@ -136,11 +136,11 @@ const AI_FRONTIER = [
 ];
 
 const GEO_NEWS = [
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump announces 25% tariffs on all steel and aluminum imports, threatens secondary tariffs on nations not buying US energy', src: 'Reuters', date: '2026-04-23' },
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump calls on Fed to cut rates "immediately by at least 1 point", renews attacks on Powell over inflation policy', src: 'Bloomberg', date: '2026-04-22' },
-  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US-Iran nuclear talks in Geneva stall as Iran rejects uranium enrichment cap; US warns of consequences', src: 'AP', date: '2026-04-24' },
-  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US deploys second carrier strike group to Strait of Hormuz; Iran Revolutionary Guard declares high alert', src: 'FT', date: '2026-04-21' },
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order accelerating critical minerals supply chain, targeting reduced China dependency', src: 'WSJ', date: '2026-04-20' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump announces 25% tariffs on all steel and aluminum imports, threatens secondary tariffs on nations not buying US energy', src: 'Reuters', date: '2026-04-23', impact: 'bear' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump calls on Fed to cut rates "immediately by at least 1 point", renews attacks on Powell over inflation policy', src: 'Bloomberg', date: '2026-04-22', impact: 'bull' },
+  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US-Iran nuclear talks in Geneva stall as Iran rejects uranium enrichment cap; US warns of consequences', src: 'AP', date: '2026-04-24', impact: 'bear' },
+  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US deploys second carrier strike group to Strait of Hormuz; Iran Revolutionary Guard declares high alert', src: 'FT', date: '2026-04-21', impact: 'bear' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order accelerating critical minerals supply chain, targeting reduced China dependency', src: 'WSJ', date: '2026-04-20', impact: 'neutral' },
 ];
 
 const TW_STOCKS_PE = [
@@ -178,55 +178,115 @@ const US_NAMES = {
   QCOM:'Qualcomm', INTC:'Intel', ARM:'ARM Holdings',
 };
 
-// Polygon free tier is 5 req/min — cache aggressively per-symbol so a refresh
-// burst of ~30 symbols doesn't blow the budget. Free-tier prev-day data is
-// 15+ min delayed anyway, so a 5-min cache costs us nothing.
-const POLYGON_CACHE_TTL = 5 * 60 * 1000;
-function readPolygonCache(symbol) {
+// Short-circuit retries on endpoints that are known to be failing right now
+// (free-tier 403 on indices, daily-quota 429 on GNews, broken proxies, etc.).
+// Without this, every page-load + refresh re-runs the same doomed requests
+// and pollutes the console.
+function isFailedRecently(key) {
   try {
-    const raw = localStorage.getItem(`pgn_${symbol}`);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch (_) { return null; }
+    const raw = localStorage.getItem('fail_' + key);
+    if (!raw) return false;
+    const { ts, ttl } = JSON.parse(raw);
+    return ts && Date.now() - ts < ttl;
+  } catch (_) { return false; }
 }
-async function fetchPolygonPrev(symbol) {
-  const cached = readPolygonCache(symbol);
-  if (cached && Date.now() - cached.ts < POLYGON_CACHE_TTL) return cached.data;
+function markFailed(key, ttlMs) {
+  try { localStorage.setItem('fail_' + key, JSON.stringify({ ts: Date.now(), ttl: ttlMs })); } catch (_) {}
+}
+const FAIL_TTL_LONG  = 24 * 60 * 60 * 1000; // 24h — for plan/permission errors (403/401)
+const FAIL_TTL_SHORT = 60 * 60 * 1000;      // 1h  — for transient quota errors (429)
+
+// ── Twelve Data: US stocks + indices + FX in one batch call ──────────────
+//
+// Free tier: 800 credits/day, 8 credits/min. A batch of N symbols counts as
+// N credits but is a single HTTP request. We cap watchlist to 8 symbols so
+// the burst stays in budget.
+//
+// If a particular commodity symbol isn't available on the free tier (some
+// futures require Pro), applyTwelveDataQuote() returns false and the slot
+// keeps its mock value — no console errors thanks to the fail-cache.
+const TD_INDEX_SYMBOLS = ['SPX', 'IXIC', 'DJI'];                         // INDICES[0..2]
+const TD_COMMODITY_SYMBOLS = ['BRENT', 'XAU/USD', 'VIX', 'USD/TWD'];     // COMMODITIES[0..3]
+
+async function fetchTwelveDataBatch(symbols) {
+  if (!cfg('TWELVE_DATA_API_KEY') || !symbols.length) return {};
+  const failKey = 'td_' + symbols.slice().sort().join(',').slice(0, 60);
+  if (isFailedRecently(failKey)) return {};
+  const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbols.join(','))}&apikey=${CONFIG.TWELVE_DATA_API_KEY}`;
   try {
-    const res = await fetch(
-      `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${CONFIG.POLYGON_API_KEY}`,
-      { signal: AbortSignal.timeout(8000) }
-    );
-    if (res.status === 429) return cached?.data ?? null; // rate-limited: serve cached
+    const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (res.status === 401 || res.status === 403) { markFailed(failKey, FAIL_TTL_LONG); return {}; }
+    if (res.status === 429) { markFailed(failKey, FAIL_TTL_SHORT); return {}; }
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
-    const data = j.results?.[0] ?? null;
-    if (data) {
-      try { localStorage.setItem(`pgn_${symbol}`, JSON.stringify({ data, ts: Date.now() })); } catch (_) {}
-    }
-    return data;
-  } catch (_) {
-    return cached?.data ?? null;
-  }
+    // Single-symbol response is flat; multi-symbol is keyed by symbol.
+    if (symbols.length === 1) return j.symbol ? { [symbols[0]]: j } : {};
+    return j || {};
+  } catch (_) { return {}; }
+}
+
+function applyTwelveDataQuote(arr, idx, q) {
+  if (!q || q.code) return false; // q.code presence = error envelope per symbol
+  const close = parseFloat(q.close);
+  if (!isFinite(close)) return false;
+  arr[idx].price  = close;
+  arr[idx].change = +(parseFloat(q.change || 0)).toFixed(2);
+  arr[idx].pct    = +(parseFloat(q.percent_change || 0)).toFixed(2);
+  return true;
+}
+
+// TWSE OpenAPI for TAIEX (加權指數) — official, free, no auth, CORS-friendly.
+// Updates after market close so this is end-of-day; intraday quotes would
+// need a different endpoint (mis.twse.com.tw, requires session).
+async function fetchTaiexFromTWSE() {
+  if (isFailedRecently('twse_taiex')) return false;
+  try {
+    const res = await fetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) { markFailed('twse_taiex', FAIL_TTL_SHORT); return false; }
+    const arr = await res.json();
+    const taiex = arr.find(r => r.Index === '發行量加權股價指數' || (r.Index || '').includes('加權股價'));
+    if (!taiex) return false;
+    const close = parseFloat(String(taiex.ClosingIndex).replace(/,/g, ''));
+    const pts = parseFloat(String(taiex.ChangePoint).replace(/,/g, ''));
+    const pct = parseFloat(taiex.ChangePercentage);
+    const sign = taiex.Change === '▲' ? 1 : (taiex.Change === '▼' ? -1 : 0);
+    if (!isFinite(close)) return false;
+    INDICES[3].price  = close;
+    INDICES[3].change = +(sign * pts).toFixed(2);
+    INDICES[3].pct    = +(sign * pct).toFixed(2);
+    return true;
+  } catch (_) { return false; }
 }
 
 async function fetchFugleQuote(symbol) {
+  const failKey = `fugle_${symbol}`;
+  if (isFailedRecently(failKey)) return null;
   const res = await fetch(
     `https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${symbol}`,
     { headers: { 'X-API-KEY': CONFIG.FUGLE_API_KEY }, signal: AbortSignal.timeout(8000) }
   );
+  if (res.status === 404 || res.status === 403) {
+    markFailed(failKey, FAIL_TTL_LONG);
+    return null;
+  }
   if (!res.ok) throw new Error(res.status);
   return res.json();
 }
 
 // FRED API does not send CORS headers, so route browser requests through a
-// public CORS proxy. corsproxy.io passes the response body through unchanged.
-const FRED_CORS_PROXY = 'https://corsproxy.io/?';
+// public CORS proxy. allorigins.win is more reliable than corsproxy.io for
+// unauthenticated traffic as of 2026.
+const FRED_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 async function fetchFredSingle(seriesId, extraParams = '') {
+  if (isFailedRecently(`fred_${seriesId}`)) throw new Error('fred-fail-cached');
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
   const url = FRED_CORS_PROXY + encodeURIComponent(target);
   const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
-  if (!res.ok) throw new Error(res.status);
+  if (!res.ok) {
+    // Cache failure so we don't hammer the proxy on every page-load
+    markFailed(`fred_${seriesId}`, res.status === 403 || res.status === 401 ? FAIL_TTL_LONG : FAIL_TTL_SHORT);
+    throw new Error(res.status);
+  }
   const j = await res.json();
   return (j.observations || []).filter(o => o.value !== '.');
 }
@@ -261,40 +321,18 @@ async function fetchFredData() {
   } catch (_) {}
 }
 
-function applyOHLC(arr, idx, d) {
-  if (!d?.c) return;
-  const pct = d.o > 0 ? ((d.c - d.o) / d.o) * 100 : 0;
-  arr[idx].price  = d.c;
-  arr[idx].change = +(d.c - d.o).toFixed(2);
-  arr[idx].pct    = +pct.toFixed(2);
-}
-
 async function fetchLiveMarketData() {
-  const hits = [];
-
-  if (cfg('POLYGON_API_KEY')) {
-    await Promise.allSettled([
-      fetchPolygonPrev('I:SPX'   ).then(d => { applyOHLC(INDICES,     0, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('I:NDX'   ).then(d => { applyOHLC(INDICES,     1, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('I:DJI'   ).then(d => { applyOHLC(INDICES,     2, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('C:BRTUSD').then(d => { applyOHLC(COMMODITIES, 0, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('C:XAUUSD').then(d => { applyOHLC(COMMODITIES, 1, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('I:VIX'   ).then(d => { applyOHLC(COMMODITIES, 2, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('C:USDTWD').then(d => { applyOHLC(COMMODITIES, 3, d); if (d) hits.push(1); }).catch(() => {}),
-    ]);
+  let hits = 0;
+  // TAIEX 加權指數 via TWSE OpenAPI (no key needed)
+  if (await fetchTaiexFromTWSE()) hits++;
+  // S&P / NASDAQ / DJI / VIX / Brent / Gold / USD-TWD in one Twelve Data batch
+  if (cfg('TWELVE_DATA_API_KEY')) {
+    const allSyms = [...TD_INDEX_SYMBOLS, ...TD_COMMODITY_SYMBOLS];
+    const quotes = await fetchTwelveDataBatch(allSyms);
+    TD_INDEX_SYMBOLS.forEach((s, i) => { if (applyTwelveDataQuote(INDICES, i, quotes[s])) hits++; });
+    TD_COMMODITY_SYMBOLS.forEach((s, i) => { if (applyTwelveDataQuote(COMMODITIES, i, quotes[s])) hits++; });
   }
-
-  if (cfg('FUGLE_API_KEY')) {
-    await fetchFugleQuote('TWSE').then(d => {
-      if (!d) return;
-      INDICES[3].price  = d.closePrice ?? d.lastPrice ?? INDICES[3].price;
-      INDICES[3].change = d.change ?? INDICES[3].change;
-      INDICES[3].pct    = d.changePercent ?? INDICES[3].pct;
-      hits.push(1);
-    }).catch(() => {});
-  }
-
-  if (hits.length) LIVE_SOURCES.market = true;
+  if (hits) LIVE_SOURCES.market = true;
 }
 
 function detectAIBrand(source, title) {
@@ -321,8 +359,14 @@ function relativeDate(dateStr) {
   return `${Math.floor(d / 365)}年前`;
 }
 
+// All three GNews calls share the same daily quota (free tier = 100/day).
+// Once one returns 429, the others will too — share a single fail-cache key
+// so a single 429 silences all GNews calls until the quota resets.
+const GNEWS_QUOTA_FAIL_KEY = 'gnews_quota';
+
 async function fetchAIFrontierNews() {
   if (!cfg('GNEWS_API_KEY')) return;
+  if (isFailedRecently(GNEWS_QUOTA_FAIL_KEY)) return;
 
   try {
     const cached = localStorage.getItem(AI_NEWS_CACHE_KEY);
@@ -343,6 +387,7 @@ async function fetchAIFrontierNews() {
     const q = encodeURIComponent('Anthropic OR OpenAI OR ChatGPT OR "Google DeepMind" OR Gemini OR Claude OR "Meta AI" OR Llama OR xAI OR Grok OR Mistral');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (res.status === 429) { markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT); return; }
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
     // Defensive: drop any articles older than 60 days even if API returned them
@@ -369,7 +414,7 @@ async function fetchAIFrontierNews() {
   } catch (_) {}
 }
 
-const GEO_NEWS_CACHE_KEY = 'geo_news_v2';
+const GEO_NEWS_CACHE_KEY = 'geo_news_v3';
 const GEO_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
 
 function detectGeoTopic(title) {
@@ -379,8 +424,34 @@ function detectGeoTopic(title) {
   return null;
 }
 
+// Heuristic: classify a geopolitical/Trump headline as bullish / bearish for
+// risk assets. Bear signals (escalation / tariffs / rate hikes) take priority
+// over bull signals when both are present.
+function detectImpact(title) {
+  const t = title.toLowerCase();
+  const bearPats = [
+    /tariff/, /sanction/, /\bwar\b/, /conflict/, /escalat/, /threat/, /\battack/,
+    /\bstrike\b/, /deploy.*(troop|carrier|missile|forces)/, /\bban\b/, /restrict/,
+    /crisis/, /recession/, /rate hike/, /raises rate/, /hike rates/, /invasion/,
+    /retaliat/, /cyber.*attack/, /shut down/, /reject/, /stall/, /collapse/,
+    /high alert/, /military/,
+  ];
+  const bullPats = [
+    /rate cut/, /cuts? rates?/, /\bease\b/, /easing/, /\bdeal\b/, /agreement/,
+    /ceasefire/, /\bpeace\b/, /\bsettle/, /lift sanction/, /recovery/,
+    /talks resume/, /deescalat/, /de-escalat/, /\btruce\b/, /breakthrough/,
+    /accord/, /resumes? trade/,
+  ];
+  if (bearPats.some(p => p.test(t))) return 'bear';
+  if (bullPats.some(p => p.test(t))) return 'bull';
+  return 'neutral';
+}
+
+const IMPACT_LABEL = { bull: '利多', bear: '利空', neutral: '中性' };
+
 async function fetchGeoNews() {
   if (!cfg('GNEWS_API_KEY')) return;
+  if (isFailedRecently(GNEWS_QUOTA_FAIL_KEY)) return;
 
   try {
     const cached = localStorage.getItem(GEO_NEWS_CACHE_KEY);
@@ -400,6 +471,7 @@ async function fetchGeoNews() {
     const q = encodeURIComponent('Trump OR Iran OR "Middle East" OR "US Iran"');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=20&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (res.status === 429) { markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT); return; }
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
@@ -408,7 +480,7 @@ async function fetchGeoNews() {
       if (!a.title || !a.url || !a.publishedAt) continue;
       const cat = detectGeoTopic(a.title);
       if (!cat) continue;
-      items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url });
+      items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url, impact: detectImpact(a.title) });
       if (items.length >= 5) break;
     }
 
@@ -435,6 +507,7 @@ function categorizeMarketNews(title, source) {
 
 async function fetchMarketNews() {
   if (!cfg('GNEWS_API_KEY')) return;
+  if (isFailedRecently(GNEWS_QUOTA_FAIL_KEY)) return;
 
   try {
     const cached = localStorage.getItem(MARKET_NEWS_CACHE_KEY);
@@ -453,6 +526,7 @@ async function fetchMarketNews() {
     const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve"');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=10&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (res.status === 429) { markFailed(GNEWS_QUOTA_FAIL_KEY, FAIL_TTL_SHORT); return; }
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
@@ -476,15 +550,27 @@ async function fetchMarketNews() {
 async function fetchAndUpdateLiveData() {
   const tasks = [];
 
-  if (cfg('POLYGON_API_KEY')) {
-    const syms = CONFIG.WATCHLIST_US ?? ['AAPL', 'NVDA', 'MSFT', 'META'];
+  if (cfg('TWELVE_DATA_API_KEY')) {
+    // Twelve Data free tier: 8 credits/min — cap watchlist to 8 symbols and
+    // fetch them all in a single batch HTTP call. Dedupe to handle config
+    // typos like duplicate VRT.
+    const rawSyms = CONFIG.WATCHLIST_US ?? ['AAPL', 'NVDA', 'MSFT', 'META'];
+    const syms = [...new Set(rawSyms)].slice(0, 8);
     tasks.push(
-      Promise.allSettled(syms.map(s => fetchPolygonPrev(s))).then(results => {
-        const live = results.map((r, i) => {
-          if (r.status !== 'fulfilled' || !r.value) return null;
-          const d = r.value;
-          const pct = d.o > 0 ? ((d.c - d.o) / d.o) * 100 : 0;
-          return { name: US_NAMES[syms[i]] || syms[i], symbol: syms[i], price: d.c, change: +(d.c - d.o).toFixed(2), pct: +pct.toFixed(2), market: 'US' };
+      fetchTwelveDataBatch(syms).then(quotes => {
+        const live = syms.map(s => {
+          const q = quotes[s];
+          if (!q || q.code) return null;
+          const close = parseFloat(q.close);
+          if (!isFinite(close)) return null;
+          return {
+            name: US_NAMES[s] || q.name || s,
+            symbol: s,
+            price: close,
+            change: +(parseFloat(q.change || 0)).toFixed(2),
+            pct:    +(parseFloat(q.percent_change || 0)).toFixed(2),
+            market: 'US',
+          };
         }).filter(Boolean);
         if (live.length) {
           const twOnly = WATCHLIST.filter(w => w.market === 'TW');
@@ -497,7 +583,8 @@ async function fetchAndUpdateLiveData() {
   }
 
   if (cfg('FUGLE_API_KEY')) {
-    const syms = CONFIG.WATCHLIST_TW ?? ['2330', '2317', '2454', '2382'];
+    const rawSyms = CONFIG.WATCHLIST_TW ?? ['2330', '2317', '2454', '2382'];
+    const syms = [...new Set(rawSyms)].slice(0, 8);
     tasks.push(
       Promise.allSettled(syms.map(s => fetchFugleQuote(s))).then(results => {
         const live = results.map((r, i) => {
@@ -578,8 +665,10 @@ function renderOverview() {
     const href = g.url ? ` href="${g.url}" target="_blank" rel="noopener"` : '';
     const style = i >= 3 ? ' style="display:none"' : '';
     const displayDate = /^\d{4}-\d{2}-\d{2}/.test(g.date) ? relativeDate(g.date) : g.date;
+    const impact = g.impact || 'neutral';
+    const impactBadge = `<span class="impact-badge impact-${impact}">${IMPACT_LABEL[impact]}</span>`;
     return `<${tag} class="news-item"${href}${style}>
-      <div><span class="news-tag tag-${g.topic}">${g.icon} ${g.label}</span></div>
+      <div><span class="news-tag tag-${g.topic}">${g.icon} ${g.label}</span>${impactBadge}</div>
       <div class="news-headline">${g.headline}</div>
       <div class="news-meta">${g.src} · ${displayDate}</div>
     </${tag}>`;
@@ -648,8 +737,8 @@ function renderOverview() {
   }).join('');
 
   const liveItems = [
-    LIVE_SOURCES.watchlist  && '自選股（Polygon.io / Fugle）',
-    LIVE_SOURCES.market     && '指數 & 原物料（Polygon.io）',
+    LIVE_SOURCES.watchlist  && '自選股（Twelve Data / Fugle）',
+    LIVE_SOURCES.market     && '指數 & 原物料（Twelve Data + TWSE）',
     LIVE_SOURCES.fed        && '總經指標（FRED）',
     LIVE_SOURCES.aiFrontier && 'AI前沿消息（GNews）',
     LIVE_SOURCES.geoNews    && '地緣政治（GNews）',

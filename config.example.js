@@ -16,10 +16,11 @@ const CONFIG = {
   // 申請：https://developer.fugle.tw/ → 免費方案即可
   FUGLE_API_KEY: 'your_fugle_api_key_here',
 
-  // ── 美股 (Polygon.io) ─────────────────────────────────────────────────
-  // 美股前日收盤、盤中報價、指數代理 ETF
-  // 申請：https://polygon.io/dashboard/signup → Free tier
-  POLYGON_API_KEY: 'your_polygon_api_key_here',
+  // ── 美股 / 指數 / FX (Twelve Data) ─────────────────────────────────────
+  // 同一個 key 取股票 + 指數 (SPX/IXIC/DJI/VIX) + FX (USD/TWD/XAU/Brent)
+  // 免費版：800 credits/day, 8 credits/min, batch 一次拿多檔
+  // 申請：https://twelvedata.com/pricing → Free tier
+  TWELVE_DATA_API_KEY: 'your_twelvedata_api_key_here',
 
   // ── AI前沿消息 (GNews.io) ─────────────────────────────────────────────
   // 支援瀏覽器端 CORS，免費方案 100 req/day，新聞即時無延遲

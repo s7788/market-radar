@@ -18,7 +18,7 @@ jobs:
 
       - name: Build config.js from secrets
         env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
           FUGLE_API_KEY: ${{ secrets.FUGLE_API_KEY }}
           GH_API_TOKEN: ${{ secrets.GH_API_TOKEN }}
           GNEWS_API_KEY: ${{ secrets.GNEWS_API_KEY }}
@@ -27,7 +27,7 @@ jobs:
           BUILD_VERSION=$(TZ='Asia/Taipei' date '+%Y%m%d%H%M')
           cat > config.js << EOF
           const CONFIG = {
-            POLYGON_API_KEY: '${POLYGON_API_KEY}',
+            TWELVE_DATA_API_KEY: '${TWELVE_DATA_API_KEY}',
             FUGLE_API_KEY: '${FUGLE_API_KEY}',
             GITHUB_TOKEN: '${GH_API_TOKEN}',
             GNEWS_API_KEY: '${GNEWS_API_KEY}',
