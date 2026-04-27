@@ -375,14 +375,15 @@ const GEO_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
 
 function detectGeoTopic(title) {
   const t = title.toLowerCase();
-  if (t.includes('trump') || t.includes('donald') || /\btariff(s)?\b/.test(t) || t.includes('trade war') || t.includes('white house') || t.includes('executive order') || t.includes('mar-a-lago'))
-    return { topic: 'trump', icon: '🇺🇸', label: '川普言論' };
+  // Check specific geographic entities first to avoid tariff/trade-war misclassification
   if (t.includes('china') || t.includes('beijing') || t.includes('xi jinping') || t.includes('taiwan strait') || t.includes('huawei') || t.includes('prc') || (t.includes('chinese') && (t.includes('trade') || t.includes('tariff') || t.includes('military') || t.includes('chip'))))
     return { topic: 'china', icon: '🇨🇳', label: '中美局勢' };
   if (t.includes('russia') || t.includes('ukraine') || t.includes('putin') || t.includes('kremlin') || t.includes('kyiv') || t.includes('moscow') || t.includes('zelensky'))
     return { topic: 'russia', icon: '🛡️', label: '俄烏局勢' };
   if (t.includes('iran') || t.includes('hormuz') || t.includes('tehran') || t.includes('middle east') || t.includes('israel') || t.includes('hamas') || t.includes('hezbollah') || t.includes('red sea') || t.includes('houthi') || t.includes('yemen') || t.includes('nuclear deal'))
     return { topic: 'iran', icon: '🌍', label: '中東局勢' };
+  if (t.includes('trump') || t.includes('donald') || /\btariff(s)?\b/.test(t) || t.includes('trade war') || t.includes('white house') || t.includes('executive order') || t.includes('mar-a-lago'))
+    return { topic: 'trump', icon: '🇺🇸', label: '川普言論' };
   return null;
 }
 
@@ -435,7 +436,7 @@ function categorizeMarketNews(title, source) {
   const t = (title + ' ' + source).toLowerCase();
   if (t.includes('earnings') || t.includes('eps') || t.includes('quarterly') || /q[1-4]\s*(20\d\d|fy)/.test(t) || t.includes('revenue beat') || t.includes('profit')) return { tag: 'earnings', label: '財報' };
   if (t.includes('chatgpt') || t.includes('openai') || t.includes('anthropic') || t.includes('nvidia') || t.includes('artificial intel') || t.includes(' llm') || /\bai\b/.test(t)) return { tag: 'ai', label: 'AI' };
-  if (t.includes('taiwan') || t.includes('tsmc') || t.includes('mediatek') || t.includes('foxconn') || t.includes('台積') || t.includes('台股') || t.includes('asml') || t.includes('samsung')) return { tag: 'tw', label: '台股' };
+  if (t.includes('taiwan') || t.includes('tsmc') || t.includes('mediatek') || t.includes('foxconn') || t.includes('台積') || t.includes('台股')) return { tag: 'tw', label: '台股' };
   if (t.includes('fed') || t.includes('inflation') || t.includes('cpi') || t.includes('powell') || t.includes('rate cut') || t.includes('fomc') || t.includes('treasury') || t.includes('jobs report') || t.includes('gdp') || t.includes('recession')) return { tag: 'macro', label: '總經' };
   return { tag: 'us', label: '美股' };
 }
