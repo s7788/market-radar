@@ -370,13 +370,19 @@ async function fetchAIFrontierNews() {
   } catch (_) {}
 }
 
-const GEO_NEWS_CACHE_KEY = 'geo_news_v2';
+const GEO_NEWS_CACHE_KEY = 'geo_news_v3';
 const GEO_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
 
 function detectGeoTopic(title) {
   const t = title.toLowerCase();
-  if (t.includes('trump') || t.includes('donald')) return { topic: 'trump', icon: '🇺🇸', label: '川普言論' };
-  if (t.includes('iran') || t.includes('hormuz') || t.includes('tehran') || t.includes('nuclear deal') || t.includes('middle east')) return { topic: 'iran', icon: '⚔️', label: '美伊局勢' };
+  if (t.includes('trump') || t.includes('donald') || /\btariff(s)?\b/.test(t) || t.includes('trade war') || t.includes('white house') || t.includes('executive order') || t.includes('mar-a-lago'))
+    return { topic: 'trump', icon: '🇺🇸', label: '川普言論' };
+  if (t.includes('china') || t.includes('beijing') || t.includes('xi jinping') || t.includes('taiwan strait') || t.includes('huawei') || t.includes('prc') || (t.includes('chinese') && (t.includes('trade') || t.includes('tariff') || t.includes('military') || t.includes('chip'))))
+    return { topic: 'china', icon: '🇨🇳', label: '中美局勢' };
+  if (t.includes('russia') || t.includes('ukraine') || t.includes('putin') || t.includes('kremlin') || t.includes('kyiv') || t.includes('moscow') || t.includes('zelensky'))
+    return { topic: 'russia', icon: '🛡️', label: '俄烏局勢' };
+  if (t.includes('iran') || t.includes('hormuz') || t.includes('tehran') || t.includes('middle east') || t.includes('israel') || t.includes('hamas') || t.includes('hezbollah') || t.includes('red sea') || t.includes('houthi') || t.includes('yemen') || t.includes('nuclear deal'))
+    return { topic: 'iran', icon: '🌍', label: '中東局勢' };
   return null;
 }
 
@@ -397,9 +403,9 @@ async function fetchGeoNews() {
   } catch (_) {}
 
   try {
-    const fromIso = new Date(Date.now() - 14 * 86400000).toISOString();
-    const q = encodeURIComponent('Trump OR Iran OR "Middle East" OR "US Iran"');
-    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=20&apikey=${CONFIG.GNEWS_API_KEY}`;
+    const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
+    const q = encodeURIComponent('Trump OR tariff OR "trade war" OR China OR "Taiwan Strait" OR Russia OR Ukraine OR Iran OR "Middle East" OR Israel OR Houthi');
+    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
@@ -410,7 +416,7 @@ async function fetchGeoNews() {
       const cat = detectGeoTopic(a.title);
       if (!cat) continue;
       items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url });
-      if (items.length >= 5) break;
+      if (items.length >= 10) break;
     }
 
     if (items.length) {
@@ -422,15 +428,15 @@ async function fetchGeoNews() {
   } catch (_) {}
 }
 
-const MARKET_NEWS_CACHE_KEY = 'market_news_v1';
+const MARKET_NEWS_CACHE_KEY = 'market_news_v2';
 const MARKET_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
 
 function categorizeMarketNews(title, source) {
   const t = (title + ' ' + source).toLowerCase();
-  if (t.includes('earnings') || t.includes('eps') || t.includes('quarterly') || /q[1-4]\b/.test(t)) return { tag: 'earnings', label: '財報' };
-  if (t.includes('chatgpt') || t.includes('openai') || t.includes('anthropic') || t.includes('nvidia') || t.includes('artificial intel') || t.includes(' llm') || t.includes(' ai ')) return { tag: 'ai', label: 'AI' };
-  if (t.includes('taiwan') || t.includes('tsmc') || t.includes('mediatek') || t.includes('foxconn') || t.includes('台積') || t.includes('台股')) return { tag: 'tw', label: '台股' };
-  if (t.includes('fed') || t.includes('inflation') || t.includes('cpi') || t.includes('powell') || t.includes('rate cut') || t.includes('treasury') || t.includes('jobs report')) return { tag: 'macro', label: '總經' };
+  if (t.includes('earnings') || t.includes('eps') || t.includes('quarterly') || /q[1-4]\s*(20\d\d|fy)/.test(t) || t.includes('revenue beat') || t.includes('profit')) return { tag: 'earnings', label: '財報' };
+  if (t.includes('chatgpt') || t.includes('openai') || t.includes('anthropic') || t.includes('nvidia') || t.includes('artificial intel') || t.includes(' llm') || /\bai\b/.test(t)) return { tag: 'ai', label: 'AI' };
+  if (t.includes('taiwan') || t.includes('tsmc') || t.includes('mediatek') || t.includes('foxconn') || t.includes('台積') || t.includes('台股') || t.includes('asml') || t.includes('samsung')) return { tag: 'tw', label: '台股' };
+  if (t.includes('fed') || t.includes('inflation') || t.includes('cpi') || t.includes('powell') || t.includes('rate cut') || t.includes('fomc') || t.includes('treasury') || t.includes('jobs report') || t.includes('gdp') || t.includes('recession')) return { tag: 'macro', label: '總經' };
   return { tag: 'us', label: '美股' };
 }
 
@@ -451,18 +457,21 @@ async function fetchMarketNews() {
   } catch (_) {}
 
   try {
-    const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve"');
-    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=10&apikey=${CONFIG.GNEWS_API_KEY}`;
+    const fromIso = new Date(Date.now() - 3 * 86400000).toISOString();
+    const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve" OR NVIDIA OR Apple OR Microsoft OR "interest rate" OR recession');
+    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=15&apikey=${CONFIG.GNEWS_API_KEY}`;
     const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
+    const cutoff = Date.now() - 7 * 86400000;
     const items = [];
     for (const a of (j.articles || [])) {
-      if (!a.title || !a.url) continue;
+      if (!a.title || !a.url || !a.publishedAt) continue;
+      if (new Date(a.publishedAt).getTime() < cutoff) continue;
       const cat = categorizeMarketNews(a.title, a.source?.name || '');
       items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.source?.name || '', time: relativeDate(a.publishedAt), url: a.url });
-      if (items.length >= 5) break;
+      if (items.length >= 7) break;
     }
 
     if (items.length) {
