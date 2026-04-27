@@ -219,12 +219,13 @@ async function fetchFugleQuote(symbol) {
   return res.json();
 }
 
-// FRED API does not send CORS headers, so route browser requests through a
-// public CORS proxy. corsproxy.io passes the response body through unchanged.
-const FRED_CORS_PROXY = 'https://corsproxy.io/?';
+// FRED and GNews do not send CORS headers, so route browser requests through a
+// public CORS proxy. allorigins.win/raw passes the response body through unchanged
+// and works from any origin (unlike corsproxy.io which is localhost-only on free tier).
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 async function fetchFredSingle(seriesId, extraParams = '') {
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
-  const url = FRED_CORS_PROXY + encodeURIComponent(target);
+  const url = CORS_PROXY + encodeURIComponent(target);
   const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
   if (!res.ok) throw new Error(res.status);
   const j = await res.json();
@@ -285,7 +286,7 @@ async function fetchLiveMarketData() {
   }
 
   if (cfg('FUGLE_API_KEY')) {
-    await fetchFugleQuote('TWSE').then(d => {
+    await fetchFugleQuote('IX0001').then(d => {
       if (!d) return;
       INDICES[3].price  = d.closePrice ?? d.lastPrice ?? INDICES[3].price;
       INDICES[3].change = d.change ?? INDICES[3].change;
@@ -342,7 +343,7 @@ async function fetchAIFrontierNews() {
     const fromIso = new Date(Date.now() - 30 * 86400000).toISOString();
     const q = encodeURIComponent('Anthropic OR OpenAI OR ChatGPT OR "Google DeepMind" OR Gemini OR Claude OR "Meta AI" OR Llama OR xAI OR Grok OR Mistral');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
     // Defensive: drop any articles older than 60 days even if API returned them
@@ -399,7 +400,7 @@ async function fetchGeoNews() {
     const fromIso = new Date(Date.now() - 14 * 86400000).toISOString();
     const q = encodeURIComponent('Trump OR Iran OR "Middle East" OR "US Iran"');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=20&apikey=${CONFIG.GNEWS_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
@@ -452,7 +453,7 @@ async function fetchMarketNews() {
   try {
     const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve"');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&max=10&apikey=${CONFIG.GNEWS_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
 
