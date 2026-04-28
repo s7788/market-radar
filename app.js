@@ -675,26 +675,26 @@ const RETAIL_DATA = {
 };
 
 // ── TWSE Retail Indicators ────────────────────────────────────────────────
+// Uses openapi.twse.com.tw which serves CORS headers — no proxy required.
+// Response format is an array of objects with Chinese named keys.
 async function fetchTWSERetailData() {
-  const proxy = CORS_PROXY;
   const toNum = s => +(String(s ?? '').replace(/,/g, ''));
 
   await Promise.allSettled([
 
     // ── 融資 / 融券 (MI_MARGN) ────────────────────────────────────────────
     (async () => {
-      const url = 'https://www.twse.com.tw/rwd/zh/marginShortselling/MI_MARGN?response=json';
-      const j = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(12000) })
+      const j = await fetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN', { signal: AbortSignal.timeout(12000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
-      if (!j || j.stat !== 'OK' || !j.data?.length) return;
+      if (!Array.isArray(j) || !j.length) return;
 
-      const fields = j.fields ?? [];
-      const row    = j.data[j.data.length - 1]; // most-recent row
+      const row = j[j.length - 1]; // most-recent row
+      const keys = Object.keys(row);
 
-      // 融資餘額(千元) ÷ 100,000 → 億元
-      const miIdx = fields.findIndex(f => /融資.*餘額/.test(f));
-      if (miIdx >= 0) {
-        const bil = Math.round(toNum(row[miIdx]) / 100000);
+      // 融資今日餘額(千元) ÷ 100,000 → 億元
+      const marginKey = keys.find(k => /融資.*餘額/.test(k) && !/前日/.test(k));
+      if (marginKey) {
+        const bil = Math.round(toNum(row[marginKey]) / 100000);
         if (bil > 200) {
           RETAIL_DATA.margin.val  = `${bil.toLocaleString()}億`;
           RETAIL_DATA.margin.raw  = Math.min(100, Math.round(bil / 60));
@@ -703,10 +703,10 @@ async function fetchTWSERetailData() {
         }
       }
 
-      // 融券餘額(千股) ÷ 10,000 → 萬張 (1張=1千股)
-      const siIdx = fields.findIndex(f => /融券.*餘額/.test(f));
-      if (siIdx >= 0) {
-        const wanLots = Math.round(toNum(row[siIdx]) / 10000);
+      // 融券今日餘額(千股) ÷ 10,000 → 萬張 (1張=1千股)
+      const shortKey = keys.find(k => /融券.*餘額/.test(k) && !/前日/.test(k));
+      if (shortKey) {
+        const wanLots = Math.round(toNum(row[shortKey]) / 10000);
         if (wanLots > 0) {
           RETAIL_DATA.short.val  = `${wanLots.toLocaleString()}萬張`;
           RETAIL_DATA.short.raw  = Math.min(100, Math.round(wanLots / 1.5));
@@ -718,23 +718,16 @@ async function fetchTWSERetailData() {
 
     // ── 成交量 vs 90日均量 (MI_INDEX) ────────────────────────────────────
     (async () => {
-      const url = 'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json';
-      const j = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(12000) })
+      const j = await fetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', { signal: AbortSignal.timeout(12000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
-      if (!j || j.stat !== 'OK' || !j.data?.length) return;
-
-      const fields  = j.fields ?? [];
-      const data    = j.data   ?? [];
-      const amtIdx  = fields.findIndex(f => /成交金額/.test(f));
-      const nameIdx = fields.findIndex(f => /指數|名稱/.test(f));
-      if (amtIdx < 0) return;
+      if (!Array.isArray(j) || !j.length) return;
 
       // Prefer 加權股價指數 row; fall back to first row
-      const mainRow = nameIdx >= 0
-        ? (data.find(r => /加權/.test(String(r[nameIdx]))) ?? data[0])
-        : data[0];
+      const mainRow = j.find(r => /加權/.test(String(r['指數'] ?? r['Index'] ?? ''))) ?? j[0];
+      const amtKey  = Object.keys(mainRow).find(k => /成交金額/.test(k));
+      if (!amtKey) return;
 
-      const raw = toNum(mainRow[amtIdx]);
+      const raw = toNum(mainRow[amtKey]);
       // 成交金額 may be in 元 or 億元; detect by magnitude
       const bil = raw > 1_000_000 ? Math.round(raw / 1e8) : Math.round(raw);
       if (!bil || bil < 50) return;
