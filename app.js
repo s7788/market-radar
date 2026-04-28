@@ -163,7 +163,7 @@ const ML_CLOCK_POSITION = 0.75; // 0-3 clock position (0=12點=Recovery起點)
 // ── Config Helpers ────────────────────────────────────────────────────────
 
 // Tracks which data sources are currently live (vs mock). String = source label, false = mock.
-const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false, geoNews: false, marketNews: false };
+const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false, geoNews: false, marketNews: false, retail: false };
 
 // Returns true only if the key exists in CONFIG and is not a placeholder
 function cfg(key) {
@@ -663,15 +663,91 @@ async function fetchAndUpdateLiveData() {
   tasks.push(fetchAIFrontierNews());
   tasks.push(fetchGeoNews());
   tasks.push(fetchMarketNews());
+  tasks.push(fetchTWSERetailData());
   await Promise.allSettled(tasks);
 }
 
 const RETAIL_DATA = {
-  margin: { val: '3,842億', raw: 72, label: '融資餘額', note: '近3個月高點' },
-  short:  { val: '1,234億', raw: 45, label: '融券餘額', note: '空頭部位偏低' },
-  vol:    { val: '+38%',    raw: 68, label: '成交量 vs 均量', note: '高於90日均量' },
-  account:{ val: '12,800', raw: 55, label: '本週新開戶數', note: '相對高但非極端' },
+  margin: { val: '—',    raw: 50, label: '融資餘額',      note: '載入中…' },
+  short:  { val: '—',    raw: 50, label: '融券餘額',      note: '載入中…' },
+  vol:    { val: '—',    raw: 50, label: '成交量 vs 均量', note: '載入中…' },
+  account:{ val: '—',   raw: 50, label: '本週新開戶數',   note: '資料待提供' },
 };
+
+// ── TWSE Retail Indicators ────────────────────────────────────────────────
+async function fetchTWSERetailData() {
+  const proxy = CORS_PROXY;
+  const toNum = s => +(String(s ?? '').replace(/,/g, ''));
+
+  await Promise.allSettled([
+
+    // ── 融資 / 融券 (MI_MARGN) ────────────────────────────────────────────
+    (async () => {
+      const url = 'https://www.twse.com.tw/rwd/zh/marginShortselling/MI_MARGN?response=json';
+      const j = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(12000) })
+        .then(r => r.ok ? r.json() : null).catch(() => null);
+      if (!j || j.stat !== 'OK' || !j.data?.length) return;
+
+      const fields = j.fields ?? [];
+      const row    = j.data[j.data.length - 1]; // most-recent row
+
+      // 融資餘額(千元) ÷ 100,000 → 億元
+      const miIdx = fields.findIndex(f => /融資.*餘額/.test(f));
+      if (miIdx >= 0) {
+        const bil = Math.round(toNum(row[miIdx]) / 100000);
+        if (bil > 200) {
+          RETAIL_DATA.margin.val  = `${bil.toLocaleString()}億`;
+          RETAIL_DATA.margin.raw  = Math.min(100, Math.round(bil / 60));
+          RETAIL_DATA.margin.note = bil > 4200 ? '融資水位偏高' : bil > 2800 ? '融資水位適中' : '融資水位偏低';
+          LIVE_SOURCES.retail = true;
+        }
+      }
+
+      // 融券餘額(千股) ÷ 10,000 → 萬張 (1張=1千股)
+      const siIdx = fields.findIndex(f => /融券.*餘額/.test(f));
+      if (siIdx >= 0) {
+        const wanLots = Math.round(toNum(row[siIdx]) / 10000);
+        if (wanLots > 0) {
+          RETAIL_DATA.short.val  = `${wanLots.toLocaleString()}萬張`;
+          RETAIL_DATA.short.raw  = Math.min(100, Math.round(wanLots / 1.5));
+          RETAIL_DATA.short.note = wanLots > 105 ? '融券偏高，空方活躍' : wanLots > 70 ? '融券中等水位' : '融券偏低，多方偏強';
+          LIVE_SOURCES.retail = true;
+        }
+      }
+    })(),
+
+    // ── 成交量 vs 90日均量 (MI_INDEX) ────────────────────────────────────
+    (async () => {
+      const url = 'https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?response=json';
+      const j = await fetch(proxy + encodeURIComponent(url), { signal: AbortSignal.timeout(12000) })
+        .then(r => r.ok ? r.json() : null).catch(() => null);
+      if (!j || j.stat !== 'OK' || !j.data?.length) return;
+
+      const fields  = j.fields ?? [];
+      const data    = j.data   ?? [];
+      const amtIdx  = fields.findIndex(f => /成交金額/.test(f));
+      const nameIdx = fields.findIndex(f => /指數|名稱/.test(f));
+      if (amtIdx < 0) return;
+
+      // Prefer 加權股價指數 row; fall back to first row
+      const mainRow = nameIdx >= 0
+        ? (data.find(r => /加權/.test(String(r[nameIdx]))) ?? data[0])
+        : data[0];
+
+      const raw = toNum(mainRow[amtIdx]);
+      // 成交金額 may be in 元 or 億元; detect by magnitude
+      const bil = raw > 1_000_000 ? Math.round(raw / 1e8) : Math.round(raw);
+      if (!bil || bil < 50) return;
+
+      const AVG_90D = 2500; // 億 — typical TWSE 90-day average
+      const pct = Math.round((bil / AVG_90D - 1) * 100);
+      RETAIL_DATA.vol.val  = (pct >= 0 ? `+${pct}` : `${pct}`) + '%';
+      RETAIL_DATA.vol.raw  = Math.min(100, Math.max(5, Math.round(bil / AVG_90D * 50)));
+      RETAIL_DATA.vol.note = `成交${bil.toLocaleString()}億，基準${AVG_90D}億`;
+      LIVE_SOURCES.retail  = true;
+    })()
+  ]);
+}
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
@@ -904,6 +980,7 @@ function renderOverview() {
     LIVE_SOURCES.aiFrontier && 'AI 前沿',
     LIVE_SOURCES.geoNews    && '地緣政治',
     LIVE_SOURCES.marketNews && '市場新聞',
+    LIVE_SOURCES.retail     && '散戶指標',
   ].filter(Boolean);
   const checkSvg = `<svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>`;
   const radioSvg = `<svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12a10 10 0 0 1 4-8M22 12a10 10 0 0 0-4-8M5 12a7 7 0 0 1 3-5.7M19 12a7 7 0 0 0-3-5.7"/><circle cx="12" cy="12" r="2"/></svg>`;
@@ -1195,10 +1272,18 @@ function renderCycle() {
     <div class="section">
       <div class="sec-head">
         <div class="sec-title">台股散戶指標</div>
-        <div class="sec-meta">融資 / 融券 / 成交量</div>
+        <div class="sec-meta">${LIVE_SOURCES.retail ? 'TWSE · 即時' : '模擬'}</div>
       </div>
       <div class="card">
-        <div class="warn-banner">⚠️ 融資餘額偏高 + 成交量放大，需留意散戶過度樂觀風險</div>
+        <div class="warn-banner">${(() => {
+          const m = RETAIL_DATA.margin.raw, s = RETAIL_DATA.short.raw, v = RETAIL_DATA.vol.raw;
+          if (m > 70 && v > 65) return '⚠️ 融資偏高 + 成交量放大，需留意散戶過度樂觀風險';
+          if (m > 70) return '⚠️ 融資水位偏高，追高需謹慎';
+          if (s > 70) return '⚠️ 融券比例偏高，空方壓力較大';
+          if (v > 70) return '⚠️ 成交量明顯放大，短線留意波動';
+          if (m < 35 && s < 35) return '✅ 融資融券偏低，籌碼相對健康';
+          return '📊 融資融券水位適中，市場情緒正常';
+        })()}</div>
         <div class="retail-grid">${retailRows}</div>
       </div>
     </div>
