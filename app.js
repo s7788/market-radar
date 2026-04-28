@@ -345,7 +345,7 @@ async function fetchAIFrontierNews() {
     const fromIso = new Date(Date.now() - 30 * 86400000).toISOString();
     const q = encodeURIComponent('Anthropic OR OpenAI OR ChatGPT OR "Google DeepMind" OR Gemini OR Claude OR "Meta AI" OR Llama OR xAI OR Grok OR Mistral');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
     // Defensive: drop any articles older than 60 days even if API returned them
@@ -501,7 +501,7 @@ async function fetchGeoNews() {
       const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
       const q = encodeURIComponent('Trump OR tariff OR "trade war" OR China OR "Taiwan Strait" OR Russia OR Ukraine OR Iran OR "Middle East" OR Israel OR Houthi');
       const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
       if (!res.ok) throw new Error(res.status);
       const j = await res.json();
       for (const a of (j.articles || [])) {
@@ -580,7 +580,7 @@ async function fetchMarketNews() {
       const fromIso = new Date(Date.now() - 3 * 86400000).toISOString();
       const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve" OR NVIDIA OR Apple OR Microsoft OR "interest rate" OR recession');
       const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=15&apikey=${CONFIG.GNEWS_API_KEY}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
       if (!res.ok) throw new Error(res.status);
       const j = await res.json();
       const cutoff = Date.now() - 7 * 86400000;
