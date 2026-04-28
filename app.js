@@ -491,6 +491,7 @@ async function fetchGeoNews() {
     }
   } catch (_) {}
 
+
   let items = [];
   let liveSource = '';
 
@@ -560,6 +561,7 @@ async function fetchMarketNews() {
       }
     }
   } catch (_) {}
+
 
   let items = [];
   let liveSource = '';
