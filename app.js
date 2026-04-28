@@ -221,10 +221,10 @@ async function fetchFugleQuote(symbol) {
   return res.json();
 }
 
-// FRED and GNews do not send CORS headers, so route browser requests through a
-// public CORS proxy. allorigins.win/raw passes the response body through unchanged
-// and works from any origin (unlike corsproxy.io which is localhost-only on free tier).
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+// FRED and GNews do not grant CORS on deployed (non-localhost) origins with free keys,
+// so all external API calls are routed through a proxy.
+// Override the proxy base via CONFIG.CORS_PROXY; defaults to corsproxy.io.
+const CORS_PROXY = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY) ? CONFIG.CORS_PROXY : 'https://corsproxy.io/?url=';
 async function fetchFredSingle(seriesId, extraParams = '') {
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
   const url = CORS_PROXY + encodeURIComponent(target);
