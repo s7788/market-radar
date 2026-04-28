@@ -223,12 +223,33 @@ async function fetchFugleQuote(symbol) {
 
 // FRED and GNews do not grant CORS on deployed (non-localhost) origins with free keys,
 // so all external API calls are routed through a proxy.
-// Override the proxy base via CONFIG.CORS_PROXY; defaults to corsproxy.io.
-const CORS_PROXY = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY) ? CONFIG.CORS_PROXY : 'https://corsproxy.io/?url=';
+// Proxies are tried in order; the first one that returns a non-403 response wins.
+// Override via CONFIG.CORS_PROXY to use a single custom proxy exclusively.
+const _CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',   // returns raw body; works for JSON & XML
+  'https://corsproxy.io/?url=',
+  'https://thingproxy.freeboard.io/fetch/',
+];
+const CORS_PROXY = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY) ? CONFIG.CORS_PROXY : _CORS_PROXIES[0];
+
+async function proxyFetch(targetUrl, options = {}) {
+  const proxies = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY)
+    ? [CONFIG.CORS_PROXY]
+    : _CORS_PROXIES;
+  let lastErr;
+  for (const proxy of proxies) {
+    try {
+      const res = await fetch(proxy + encodeURIComponent(targetUrl), options);
+      if (res.status === 429 || res.ok) return res; // 429 rate-limit: let caller handle
+      lastErr = new Error(res.status);
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr ?? new Error('All CORS proxies failed');
+}
+
 async function fetchFredSingle(seriesId, extraParams = '') {
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
-  const url = CORS_PROXY + encodeURIComponent(target);
-  const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+  const res = await proxyFetch(target, { signal: AbortSignal.timeout(12000) });
   if (!res.ok) throw new Error(res.status);
   const j = await res.json();
   return (j.observations || []).filter(o => o.value !== '.');
@@ -345,7 +366,7 @@ async function fetchAIFrontierNews() {
     const fromIso = new Date(Date.now() - 30 * 86400000).toISOString();
     const q = encodeURIComponent('Anthropic OR OpenAI OR ChatGPT OR "Google DeepMind" OR Gemini OR Claude OR "Meta AI" OR Llama OR xAI OR Grok OR Mistral');
     const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
-    const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
+    const res = await proxyFetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(res.status);
     const j = await res.json();
     // Defensive: drop any articles older than 60 days even if API returned them
@@ -374,8 +395,7 @@ async function fetchAIFrontierNews() {
 
 // ── RSS Fetcher (free, no API key; uses allorigins.win proxy for CORS) ────
 async function fetchRSSItems(rssUrl, sourceName) {
-  const url = CORS_PROXY + encodeURIComponent(rssUrl);
-  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const res = await proxyFetch(rssUrl, { signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error(res.status);
   const xml = await res.text();
   const doc = new DOMParser().parseFromString(xml, 'text/xml');
@@ -501,7 +521,7 @@ async function fetchGeoNews() {
       const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
       const q = encodeURIComponent('Trump OR tariff OR "trade war" OR China OR "Taiwan Strait" OR Russia OR Ukraine OR Iran OR "Middle East" OR Israel OR Houthi');
       const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
-      const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
+      const res = await proxyFetch(url, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) throw new Error(res.status);
       const j = await res.json();
       for (const a of (j.articles || [])) {
@@ -580,7 +600,7 @@ async function fetchMarketNews() {
       const fromIso = new Date(Date.now() - 3 * 86400000).toISOString();
       const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve" OR NVIDIA OR Apple OR Microsoft OR "interest rate" OR recession');
       const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=15&apikey=${CONFIG.GNEWS_API_KEY}`;
-      const res = await fetch(CORS_PROXY + encodeURIComponent(url), { signal: AbortSignal.timeout(10000) });
+      const res = await proxyFetch(url, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) throw new Error(res.status);
       const j = await res.json();
       const cutoff = Date.now() - 7 * 86400000;
@@ -675,7 +695,8 @@ const RETAIL_DATA = {
 };
 
 // ── TWSE Retail Indicators ────────────────────────────────────────────────
-// Uses openapi.twse.com.tw which serves CORS headers — no proxy required.
+// openapi.twse.com.tw blocks cross-origin requests from deployed domains (CORS error).
+// All calls are routed through proxyFetch which tries allorigins.win first.
 // Response format is an array of objects with Chinese named keys.
 async function fetchTWSERetailData() {
   const toNum = s => +(String(s ?? '').replace(/,/g, ''));
@@ -684,7 +705,7 @@ async function fetchTWSERetailData() {
 
     // ── 融資 / 融券 (MI_MARGN) ────────────────────────────────────────────
     (async () => {
-      const j = await fetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN', { signal: AbortSignal.timeout(12000) })
+      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN', { signal: AbortSignal.timeout(12000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
       if (!Array.isArray(j) || !j.length) return;
 
@@ -718,7 +739,7 @@ async function fetchTWSERetailData() {
 
     // ── 成交量 vs 90日均量 (MI_INDEX) ────────────────────────────────────
     (async () => {
-      const j = await fetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', { signal: AbortSignal.timeout(12000) })
+      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', { signal: AbortSignal.timeout(12000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
       if (!Array.isArray(j) || !j.length) return;
 
