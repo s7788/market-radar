@@ -26,7 +26,7 @@ jobs:
           CORS_PROXY: ${{ secrets.CORS_PROXY }}
         run: |
           BUILD_VERSION=$(TZ='Asia/Taipei' date '+%Y%m%d%H%M')
-          CORS_PROXY_VAL="${CORS_PROXY:-https://corsproxy.io/?url=}"
+          CORS_PROXY_VAL="${CORS_PROXY:-https://api.allorigins.win/raw?url=}"
           cat > config.js << EOF
           const CONFIG = {
             TWELVE_DATA_API_KEY: '${TWELVE_DATA_API_KEY}',
