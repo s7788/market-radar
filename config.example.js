@@ -36,6 +36,11 @@ const CONFIG = {
   WATCHLIST_US: ['AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'AMZN'],
   WATCHLIST_TW: ['2330', '2317', '2454', '2382', '2308', '3017'],
 
+  // ── CORS Proxy ────────────────────────────────────────────────────────────
+  // FRED 和 GNews 在 deployed origin 上不提供 CORS，需透過 proxy 轉發。
+  // 預設為 corsproxy.io（免設定）。若有自架 proxy 或其他端點，在此覆寫。
+  // CORS_PROXY: 'https://corsproxy.io/?url=',
+
   // ── 部署版本（CI 自動覆寫，本地開發用 'dev'）────────────────────────────
   BUILD_VERSION: 'dev',
 
