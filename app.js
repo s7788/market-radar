@@ -54,13 +54,13 @@ const WATCHLIST = [
 ];
 
 const NEWS = [
-  { tag: 'earnings', label: '財報', title: 'Meta Q1 2026：EPS $5.12 超預期，AI廣告收入年增 28%，盤後漲逾 5%', src: 'Meta Investor Relations', time: '2小時前' },
-  { tag: 'ai',       label: 'AI', title: 'NVIDIA Blackwell Ultra (B300) 開始出貨，H100 價差持續收斂，台積電 CoWoS-L 佔有率提升', src: 'Reuters', time: '4小時前' },
-  { tag: 'tw',       label: '台股', title: '台積電法說會：2026年全年資本支出維持 380-400億美元，AI 伺服器佔收入比超過 30%', src: '財訊', time: '5小時前' },
-  { tag: 'macro',    label: '總經', title: '川普宣布對歐盟汽車加徵25%關稅暫緩至6月，市場情緒短暫回升', src: 'Bloomberg', time: '6小時前' },
-  { tag: 'us',       label: '美股', title: 'Alphabet Q1財報優於預期，Cloud部門首度突破150億美元季收入，股價創新高', src: 'CNBC', time: '8小時前' },
-  { tag: 'tw',       label: '台股', title: '聯發科 Dimensity 9500 導入AI代理框架，手機端AI本地推論效能提升 3倍', src: '電子時報', time: '昨天' },
-  { tag: 'macro',    label: '總經', title: '日本央行維持利率不變，日圓承壓走貶至151附近，亞洲資金流向美元資產', src: 'FT', time: '昨天' },
+  { tag: 'macro',    label: '總經', title: 'FOMC 會議今晚登場：市場預期維持利率不變，Powell 記者會措辭成關鍵，降息預期推至9月', src: 'Bloomberg', time: '1小時前' },
+  { tag: 'earnings', label: '財報', title: 'Alphabet Q1 2026 EPS $2.81 超預期 11%，Google Cloud 季收入達 127億美元創新高，盤後漲 6.2%', src: 'CNBC', time: '3小時前' },
+  { tag: 'earnings', label: '財報', title: 'Microsoft Q3 FY2026 盤後：Azure 成長加速至 35%，Copilot 企業訂閱數突破 5000 萬，EPS $3.46 勝預期', src: 'WSJ', time: '5小時前' },
+  { tag: 'ai',       label: 'AI', title: 'NVIDIA GB300 NVL72 伺服器機櫃開始交貨，台積電 CoWoS-L 產能全數搶訂，AI算力需求再創新高', src: 'Reuters', time: '7小時前' },
+  { tag: 'tw',       label: '台股', title: '台積電 Q1 2026 法說：EPS NT$16.4 優於預期，全年資本支出上修至 400–420 億美元，AI CoWoS 佔比 35%', src: '財訊', time: '昨天' },
+  { tag: 'us',       label: '美股', title: 'S&P 500 本週財報季衝刺：Apple、Amazon 明日盤後公布，選擇權隱含波動率急升', src: 'Barron\'s', time: '昨天' },
+  { tag: 'macro',    label: '總經', title: 'PCE 通膨數據周三公布在即：市場預估年增 2.7%，若超預期將壓縮年內降息空間', src: 'FT', time: '昨天' },
 ];
 
 const EARNINGS_CALENDAR = [
@@ -136,11 +136,13 @@ const AI_FRONTIER = [
 ];
 
 const GEO_NEWS = [
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump announces 25% tariffs on all steel and aluminum imports, threatens secondary tariffs on nations not buying US energy', src: 'Reuters', date: '2026-04-23' },
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump calls on Fed to cut rates "immediately by at least 1 point", renews attacks on Powell over inflation policy', src: 'Bloomberg', date: '2026-04-22' },
-  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US-Iran nuclear talks in Geneva stall as Iran rejects uranium enrichment cap; US warns of consequences', src: 'AP', date: '2026-04-24' },
-  { topic: 'iran',  icon: '⚔️',  label: '美伊局勢', headline: 'US deploys second carrier strike group to Strait of Hormuz; Iran Revolutionary Guard declares high alert', src: 'FT', date: '2026-04-21' },
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order accelerating critical minerals supply chain, targeting reduced China dependency', src: 'WSJ', date: '2026-04-20' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump threatens additional 50% tariffs on Chinese goods unless Beijing resumes trade talks by May 9 deadline', src: 'Reuters', date: '2026-04-27T06:15:00Z' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump demands Fed cut rates by 75bp before July, posts on Truth Social: "Powell is killing the economy with stubbornness"', src: 'Bloomberg', date: '2026-04-27T04:30:00Z' },
+  { topic: 'china', icon: '🇨🇳', label: '中美局勢', headline: 'China suspends Boeing aircraft deliveries, restricts rare earth exports in tit-for-tat response to US chip controls', src: 'FT', date: '2026-04-26T22:00:00Z' },
+  { topic: 'china', icon: '🇨🇳', label: '中美局勢', headline: 'TSMC restricted from supplying advanced 2nm chips to Huawei-linked firms; US expands Entity List to 47 new Chinese entities', src: 'WSJ', date: '2026-04-26T18:45:00Z' },
+  { topic: 'iran',  icon: '🌍',  label: '中東局勢', headline: 'US-Iran nuclear negotiations break down; White House signals military options "back on the table" as Hormuz tensions escalate', src: 'AP', date: '2026-04-25T14:00:00Z' },
+  { topic: 'russia',icon: '🛡️', label: '俄烏局勢', headline: 'Ukraine drone strike hits Russian oil terminal near Novorossiysk; Brent crude spikes 2.4% on supply disruption fears', src: 'Reuters', date: '2026-04-25T08:20:00Z' },
+  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order to fast-track domestic critical minerals permits, targeting 90% reduction in China rare earth dependency by 2028', src: 'WSJ', date: '2026-04-24T20:00:00Z' },
 ];
 
 const TW_STOCKS_PE = [
@@ -160,7 +162,7 @@ const ML_CLOCK_POSITION = 0.75; // 0-3 clock position (0=12點=Recovery起點)
 
 // ── Config Helpers ────────────────────────────────────────────────────────
 
-// Tracks which data sources are currently live (vs mock)
+// Tracks which data sources are currently live (vs mock). String = source label, false = mock.
 const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false, geoNews: false, marketNews: false };
 
 // Returns true only if the key exists in CONFIG and is not a placeholder
@@ -370,6 +372,93 @@ async function fetchAIFrontierNews() {
   } catch (_) {}
 }
 
+// ── RSS Fetcher (free, no API key; uses allorigins.win proxy for CORS) ────
+async function fetchRSSItems(rssUrl, sourceName) {
+  const url = CORS_PROXY + encodeURIComponent(rssUrl);
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(res.status);
+  const xml = await res.text();
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  return [...doc.querySelectorAll('item')].map(item => {
+    // <link> in RSS is sometimes a text node sibling, not a child text node
+    const linkEl = item.querySelector('link');
+    const link = linkEl?.textContent?.trim() || linkEl?.nextSibling?.textContent?.trim() || '';
+    return {
+      title: item.querySelector('title')?.textContent?.trim() || '',
+      link,
+      pubDate: item.querySelector('pubDate')?.textContent?.trim() || new Date().toISOString(),
+      source: sourceName,
+    };
+  }).filter(i => i.title && i.link);
+}
+
+const GEO_RSS_FEEDS = [
+  { url: 'https://feeds.bbci.co.uk/news/world/rss.xml',            src: 'BBC' },
+  { url: 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml', src: 'NYT' },
+];
+
+const MARKET_RSS_FEEDS = [
+  { url: 'https://feeds.marketwatch.com/marketwatch/topstories/', src: 'MarketWatch' },
+  { url: 'https://finance.yahoo.com/rss/topfinstories',           src: 'Yahoo Finance' },
+];
+
+async function fetchGeoNewsFromRSS() {
+  const items = [];
+  for (const feed of GEO_RSS_FEEDS) {
+    try {
+      const articles = await fetchRSSItems(feed.url, feed.src);
+      for (const a of articles) {
+        const cat = detectGeoTopic(a.title);
+        if (!cat) continue;
+        if (items.some(i => i.headline === a.title)) continue;
+        items.push({
+          topic: cat.topic, icon: cat.icon, label: cat.label,
+          headline: a.title, src: a.source,
+          date: new Date(a.pubDate).toISOString(),
+          url: a.link,
+        });
+        if (items.length >= 10) break;
+      }
+    } catch (_) {}
+    if (items.length >= 10) break;
+  }
+  return items;
+}
+
+async function fetchMarketNewsFromPolygon() {
+  if (!cfg('POLYGON_API_KEY')) return [];
+  const from = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+  const url = `https://api.polygon.io/v2/reference/news?limit=20&published_utc.gte=${from}&order=desc&sort=published_utc&apiKey=${CONFIG.POLYGON_API_KEY}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(res.status);
+  const j = await res.json();
+  const items = [];
+  for (const a of (j.results || [])) {
+    if (!a.title || !a.article_url) continue;
+    const cat = categorizeMarketNews(a.title, a.publisher?.name || '');
+    items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.publisher?.name || '', time: relativeDate(a.published_utc), url: a.article_url });
+    if (items.length >= 7) break;
+  }
+  return items;
+}
+
+async function fetchMarketNewsFromRSS() {
+  const items = [];
+  for (const feed of MARKET_RSS_FEEDS) {
+    try {
+      const articles = await fetchRSSItems(feed.url, feed.src);
+      for (const a of articles) {
+        const cat = categorizeMarketNews(a.title, a.source);
+        if (items.some(i => i.title === a.title)) continue;
+        items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.source, time: relativeDate(new Date(a.pubDate).toISOString()), url: a.link });
+        if (items.length >= 7) break;
+      }
+    } catch (_) {}
+    if (items.length >= 7) break;
+  }
+  return items;
+}
+
 const GEO_NEWS_CACHE_KEY = 'geo_news_v3';
 const GEO_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
 
@@ -388,45 +477,61 @@ function detectGeoTopic(title) {
 }
 
 async function fetchGeoNews() {
-  if (!cfg('GNEWS_API_KEY')) return;
-
+  // Serve from cache first
   try {
     const cached = localStorage.getItem(GEO_NEWS_CACHE_KEY);
     if (cached) {
-      const { items, ts } = JSON.parse(cached);
+      const { items, ts, src } = JSON.parse(cached);
       if (Date.now() - ts < GEO_NEWS_CACHE_TTL) {
         GEO_NEWS.length = 0;
         GEO_NEWS.push(...items);
-        LIVE_SOURCES.geoNews = true;
+        LIVE_SOURCES.geoNews = src || 'GNews';
         return;
       }
     }
   } catch (_) {}
 
-  try {
-    const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
-    const q = encodeURIComponent('Trump OR tariff OR "trade war" OR China OR "Taiwan Strait" OR Russia OR Ukraine OR Iran OR "Middle East" OR Israel OR Houthi');
-    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(res.status);
-    const j = await res.json();
+  let items = [];
+  let liveSource = '';
 
-    const items = [];
-    for (const a of (j.articles || [])) {
-      if (!a.title || !a.url || !a.publishedAt) continue;
-      const cat = detectGeoTopic(a.title);
-      if (!cat) continue;
-      items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url });
-      if (items.length >= 10) break;
-    }
+  // 1) GNews API (if key configured)
+  if (cfg('GNEWS_API_KEY')) {
+    try {
+      const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
+      const q = encodeURIComponent('Trump OR tariff OR "trade war" OR China OR "Taiwan Strait" OR Russia OR Ukraine OR Iran OR "Middle East" OR Israel OR Houthi');
+      const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error(res.status);
+      const j = await res.json();
+      for (const a of (j.articles || [])) {
+        if (!a.title || !a.url || !a.publishedAt) continue;
+        const cat = detectGeoTopic(a.title);
+        if (!cat) continue;
+        items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url });
+        if (items.length >= 10) break;
+      }
+      if (items.length) liveSource = 'GNews';
+    } catch (_) {}
+  }
 
-    if (items.length) {
-      try { localStorage.setItem(GEO_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now() })); } catch (_) {}
-      GEO_NEWS.length = 0;
-      GEO_NEWS.push(...items);
-      LIVE_SOURCES.geoNews = true;
-    }
-  } catch (_) {}
+  // 2) RSS fallback (BBC World + NYT World, no API key needed)
+  if (items.length < 3) {
+    try {
+      const rssItems = await fetchGeoNewsFromRSS();
+      for (const r of rssItems) {
+        if (!items.some(i => i.headline === r.headline)) items.push(r);
+        if (items.length >= 10) break;
+      }
+      if (items.length) liveSource = liveSource || 'RSS';
+    } catch (_) {}
+  }
+
+  if (items.length) {
+    try { localStorage.setItem(GEO_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now(), src: liveSource })); } catch (_) {}
+    GEO_NEWS.length = 0;
+    GEO_NEWS.push(...items);
+    LIVE_SOURCES.geoNews = liveSource;
+  }
 }
 
 const MARKET_NEWS_CACHE_KEY = 'market_news_v2';
@@ -442,46 +547,71 @@ function categorizeMarketNews(title, source) {
 }
 
 async function fetchMarketNews() {
-  if (!cfg('GNEWS_API_KEY')) return;
-
+  // Serve from cache first
   try {
     const cached = localStorage.getItem(MARKET_NEWS_CACHE_KEY);
     if (cached) {
-      const { items, ts } = JSON.parse(cached);
+      const { items, ts, src } = JSON.parse(cached);
       if (Date.now() - ts < MARKET_NEWS_CACHE_TTL) {
         NEWS.length = 0;
         NEWS.push(...items);
-        LIVE_SOURCES.marketNews = true;
+        LIVE_SOURCES.marketNews = src || 'Polygon';
         return;
       }
     }
   } catch (_) {}
 
-  try {
-    const fromIso = new Date(Date.now() - 3 * 86400000).toISOString();
-    const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve" OR NVIDIA OR Apple OR Microsoft OR "interest rate" OR recession');
-    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=15&apikey=${CONFIG.GNEWS_API_KEY}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(res.status);
-    const j = await res.json();
+  let items = [];
+  let liveSource = '';
 
-    const cutoff = Date.now() - 7 * 86400000;
-    const items = [];
-    for (const a of (j.articles || [])) {
-      if (!a.title || !a.url || !a.publishedAt) continue;
-      if (new Date(a.publishedAt).getTime() < cutoff) continue;
-      const cat = categorizeMarketNews(a.title, a.source?.name || '');
-      items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.source?.name || '', time: relativeDate(a.publishedAt), url: a.url });
-      if (items.length >= 7) break;
-    }
+  // 1) Polygon.io news (already-configured key, no quota overhead on news endpoint)
+  if (cfg('POLYGON_API_KEY')) {
+    try {
+      items = await fetchMarketNewsFromPolygon();
+      if (items.length) liveSource = 'Polygon';
+    } catch (_) {}
+  }
 
-    if (items.length) {
-      try { localStorage.setItem(MARKET_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now() })); } catch (_) {}
-      NEWS.length = 0;
-      NEWS.push(...items);
-      LIVE_SOURCES.marketNews = true;
-    }
-  } catch (_) {}
+  // 2) GNews API (if key configured)
+  if (items.length < 3 && cfg('GNEWS_API_KEY')) {
+    try {
+      const fromIso = new Date(Date.now() - 3 * 86400000).toISOString();
+      const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve" OR NVIDIA OR Apple OR Microsoft OR "interest rate" OR recession');
+      const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=15&apikey=${CONFIG.GNEWS_API_KEY}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) throw new Error(res.status);
+      const j = await res.json();
+      const cutoff = Date.now() - 7 * 86400000;
+      for (const a of (j.articles || [])) {
+        if (!a.title || !a.url || !a.publishedAt) continue;
+        if (new Date(a.publishedAt).getTime() < cutoff) continue;
+        const cat = categorizeMarketNews(a.title, a.source?.name || '');
+        if (!items.some(i => i.title === a.title))
+          items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.source?.name || '', time: relativeDate(a.publishedAt), url: a.url });
+        if (items.length >= 7) break;
+      }
+      if (items.length) liveSource = liveSource || 'GNews';
+    } catch (_) {}
+  }
+
+  // 3) RSS fallback (MarketWatch + Yahoo Finance, no API key needed)
+  if (items.length < 3) {
+    try {
+      const rssItems = await fetchMarketNewsFromRSS();
+      for (const r of rssItems) {
+        if (!items.some(i => i.title === r.title)) items.push(r);
+        if (items.length >= 7) break;
+      }
+      if (items.length) liveSource = liveSource || 'RSS';
+    } catch (_) {}
+  }
+
+  if (items.length) {
+    try { localStorage.setItem(MARKET_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now(), src: liveSource })); } catch (_) {}
+    NEWS.length = 0;
+    NEWS.push(...items);
+    LIVE_SOURCES.marketNews = liveSource;
+  }
 }
 
 async function fetchAndUpdateLiveData() {
@@ -813,7 +943,7 @@ function renderOverview() {
     <div class="section">
       <div class="sec-head">
         <div class="sec-title">地緣政治 &amp; 川普言論</div>
-        <div class="sec-meta">${LIVE_SOURCES.geoNews ? 'GNews · 即時' : '模擬'}</div>
+        <div class="sec-meta">${LIVE_SOURCES.geoNews ? `${LIVE_SOURCES.geoNews} · 即時` : '模擬'}</div>
       </div>
       <div class="card">
         <div class="expandable">${geoRows}</div>
@@ -823,7 +953,7 @@ function renderOverview() {
     <div class="section">
       <div class="sec-head">
         <div class="sec-title">今日快訊</div>
-        <div class="sec-meta">${LIVE_SOURCES.marketNews ? 'GNews · 即時' : '模擬'}</div>
+        <div class="sec-meta">${LIVE_SOURCES.marketNews ? `${LIVE_SOURCES.marketNews} · 即時` : '模擬'}</div>
       </div>
       <div class="card">
         <div class="expandable">${topNews}</div>
@@ -893,7 +1023,7 @@ function renderNews() {
     <div class="section">
       <div class="sec-head">
         <div class="sec-title">市場要聞</div>
-        <div class="sec-meta">${LIVE_SOURCES.marketNews ? 'GNews · 即時' : '模擬'}</div>
+        <div class="sec-meta">${LIVE_SOURCES.marketNews ? `${LIVE_SOURCES.marketNews} · 即時` : '模擬'}</div>
       </div>
       <div class="card">
         <div class="expandable">${allNews}</div>
