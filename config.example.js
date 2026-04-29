@@ -22,11 +22,6 @@ const CONFIG = {
   // 申請：https://twelvedata.com/pricing → Free tier
   TWELVE_DATA_API_KEY: 'your_twelvedata_api_key_here',
 
-  // ── AI前沿消息 (GNews.io) ─────────────────────────────────────────────
-  // 支援瀏覽器端 CORS，免費方案 100 req/day，新聞即時無延遲
-  // 申請：https://gnews.io/ → 免費註冊取得 API Key
-  GNEWS_API_KEY: 'your_gnews_api_key_here',
-
   // ── 自選股清單 ────────────────────────────────────────────────────────
   // 修改這裡即可自訂追蹤的股票，無需動 app.js
   // FRED (Federal Reserve Economic Data) - 自動更新總經指標

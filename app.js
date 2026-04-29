@@ -221,8 +221,8 @@ async function fetchFugleQuote(symbol) {
   return res.json();
 }
 
-// FRED and GNews do not grant CORS on deployed (non-localhost) origins with free keys,
-// so all external API calls are routed through a proxy.
+// Some APIs do not grant CORS on deployed (non-localhost) origins,
+// so external API calls are routed through a proxy.
 // Proxies are tried in order; the first one that returns a non-403 response wins.
 // Override via CONFIG.CORS_PROXY to use a single custom proxy exclusively.
 const _CORS_PROXIES = [
@@ -347,9 +347,15 @@ function relativeDate(dateStr) {
   return `${Math.floor(d / 365)}年前`;
 }
 
-async function fetchAIFrontierNews() {
-  if (!cfg('GNEWS_API_KEY')) return;
+// ── AI Frontier RSS feeds (no API key, no quota) ─────────────────────────
+const AI_RSS_FEEDS = [
+  { url: 'https://techcrunch.com/category/artificial-intelligence/feed/', src: 'TechCrunch' },
+  { url: 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', src: 'The Verge' },
+  { url: 'https://venturebeat.com/category/ai/feed/', src: 'VentureBeat' },
+];
 
+async function fetchAIFrontierNews() {
+  // Serve from cache first
   try {
     const cached = localStorage.getItem(AI_NEWS_CACHE_KEY);
     if (cached) {
@@ -363,36 +369,38 @@ async function fetchAIFrontierNews() {
     }
   } catch (_) {}
 
-  try {
-    // Only pull articles from the last 30 days so we don't surface year-old results
-    const fromIso = new Date(Date.now() - 30 * 86400000).toISOString();
-    const q = encodeURIComponent('Anthropic OR OpenAI OR ChatGPT OR "Google DeepMind" OR Gemini OR Claude OR "Meta AI" OR Llama OR xAI OR Grok OR Mistral');
-    const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
-    const res = await proxyFetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(res.status);
-    const j = await res.json();
-    // Defensive: drop any articles older than 60 days even if API returned them
-    const cutoff = Date.now() - 60 * 86400000;
-    const articles = (j.articles || []).filter(a => a.title && a.url && a.publishedAt && new Date(a.publishedAt).getTime() > cutoff);
+  // Fetch from AI-focused RSS feeds — free, no API key, no quota
+  const cutoff = Date.now() - 30 * 86400000; // drop articles older than 30 days
+  const seen = new Set();
+  const items = [];
 
-    const seen = new Set();
-    const items = [];
-    for (const a of articles) {
-      const brand = detectAIBrand(a.source?.name || '', a.title);
-      if (!brand) continue;
-      if (seen.has(brand.brand)) continue;
-      seen.add(brand.brand);
-      items.push({ logo: brand.logo, brand: brand.brand, headline: a.title, date: a.publishedAt, url: a.url });
-      if (items.length >= 5) break;
-    }
+  for (const feed of AI_RSS_FEEDS) {
+    try {
+      const articles = await fetchRSSItems(feed.url, feed.src);
+      for (const a of articles) {
+        if (new Date(a.pubDate).getTime() < cutoff) continue;
+        const brand = detectAIBrand(feed.src, a.title);
+        if (!brand) continue;
+        if (seen.has(brand.brand)) continue;
+        seen.add(brand.brand);
+        items.push({
+          logo: brand.logo, brand: brand.brand,
+          headline: a.title,
+          date: new Date(a.pubDate).toISOString(),
+          url: a.link,
+        });
+        if (items.length >= 5) break;
+      }
+    } catch (_) {}
+    if (items.length >= 5) break;
+  }
 
-    if (items.length) {
-      try { localStorage.setItem(AI_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now() })); } catch (_) {}
-      AI_FRONTIER.length = 0;
-      AI_FRONTIER.push(...items);
-      LIVE_SOURCES.aiFrontier = true;
-    }
-  } catch (_) {}
+  if (items.length) {
+    try { localStorage.setItem(AI_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now() })); } catch (_) {}
+    AI_FRONTIER.length = 0;
+    AI_FRONTIER.push(...items);
+    LIVE_SOURCES.aiFrontier = true;
+  }
 }
 
 // ── RSS Fetcher (free, no API key; uses allorigins.win proxy for CORS) ────
@@ -507,7 +515,7 @@ async function fetchGeoNews() {
       if (Date.now() - ts < GEO_NEWS_CACHE_TTL) {
         GEO_NEWS.length = 0;
         GEO_NEWS.push(...items);
-        LIVE_SOURCES.geoNews = src || 'GNews';
+        LIVE_SOURCES.geoNews = src || 'RSS';
         return;
       }
     }
@@ -515,45 +523,21 @@ async function fetchGeoNews() {
 
 
   let items = [];
-  let liveSource = '';
 
-  // 1) GNews API (if key configured)
-  if (cfg('GNEWS_API_KEY')) {
-    try {
-      const fromIso = new Date(Date.now() - 7 * 86400000).toISOString();
-      const q = encodeURIComponent('Trump OR tariff OR "trade war" OR China OR "Taiwan Strait" OR Russia OR Ukraine OR Iran OR "Middle East" OR Israel OR Houthi');
-      const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=30&apikey=${CONFIG.GNEWS_API_KEY}`;
-      const res = await proxyFetch(url, { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) throw new Error(res.status);
-      const j = await res.json();
-      for (const a of (j.articles || [])) {
-        if (!a.title || !a.url || !a.publishedAt) continue;
-        const cat = detectGeoTopic(a.title);
-        if (!cat) continue;
-        items.push({ topic: cat.topic, icon: cat.icon, label: cat.label, headline: a.title, src: a.source?.name || '', date: a.publishedAt, url: a.url });
-        if (items.length >= 10) break;
-      }
-      if (items.length) liveSource = 'GNews';
-    } catch (_) {}
-  }
-
-  // 2) RSS fallback (BBC World + NYT World, no API key needed)
-  if (items.length < 3) {
-    try {
-      const rssItems = await fetchGeoNewsFromRSS();
-      for (const r of rssItems) {
-        if (!items.some(i => i.headline === r.headline)) items.push(r);
-        if (items.length >= 10) break;
-      }
-      if (items.length) liveSource = liveSource || 'RSS';
-    } catch (_) {}
-  }
+  // RSS primary (BBC World + NYT World) — free, no API key, no quota
+  try {
+    const rssItems = await fetchGeoNewsFromRSS();
+    for (const r of rssItems) {
+      if (!items.some(i => i.headline === r.headline)) items.push(r);
+      if (items.length >= 10) break;
+    }
+  } catch (_) {}
 
   if (items.length) {
-    try { localStorage.setItem(GEO_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now(), src: liveSource })); } catch (_) {}
+    try { localStorage.setItem(GEO_NEWS_CACHE_KEY, JSON.stringify({ items, ts: Date.now(), src: 'RSS' })); } catch (_) {}
     GEO_NEWS.length = 0;
     GEO_NEWS.push(...items);
-    LIVE_SOURCES.geoNews = liveSource;
+    LIVE_SOURCES.geoNews = 'RSS';
   }
 }
 
@@ -596,29 +580,7 @@ async function fetchMarketNews() {
     } catch (_) {}
   }
 
-  // 2) GNews API (if key configured)
-  if (items.length < 3 && cfg('GNEWS_API_KEY')) {
-    try {
-      const fromIso = new Date(Date.now() - 3 * 86400000).toISOString();
-      const q = encodeURIComponent('"stock market" OR earnings OR "Wall Street" OR Nasdaq OR "S&P 500" OR TSMC OR "Federal Reserve" OR NVIDIA OR Apple OR Microsoft OR "interest rate" OR recession');
-      const url = `https://gnews.io/api/v4/search?q=${q}&lang=en&sortby=publishedAt&from=${encodeURIComponent(fromIso)}&max=15&apikey=${CONFIG.GNEWS_API_KEY}`;
-      const res = await proxyFetch(url, { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) throw new Error(res.status);
-      const j = await res.json();
-      const cutoff = Date.now() - 7 * 86400000;
-      for (const a of (j.articles || [])) {
-        if (!a.title || !a.url || !a.publishedAt) continue;
-        if (new Date(a.publishedAt).getTime() < cutoff) continue;
-        const cat = categorizeMarketNews(a.title, a.source?.name || '');
-        if (!items.some(i => i.title === a.title))
-          items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.source?.name || '', time: relativeDate(a.publishedAt), url: a.url });
-        if (items.length >= 7) break;
-      }
-      if (items.length) liveSource = liveSource || 'GNews';
-    } catch (_) {}
-  }
-
-  // 3) RSS fallback (MarketWatch + Yahoo Finance, no API key needed)
+  // 2) RSS (MarketWatch + Yahoo Finance) — free, no API key, no quota
   if (items.length < 3) {
     try {
       const rssItems = await fetchMarketNewsFromRSS();
@@ -1388,7 +1350,7 @@ function renderAI() {
     <div class="section">
       <div class="sec-head">
         <div class="sec-title">AI 前沿消息</div>
-        <div class="sec-meta">${LIVE_SOURCES.aiFrontier ? 'GNews · 每 30 分鐘更新' : '模擬'}</div>
+        <div class="sec-meta">${LIVE_SOURCES.aiFrontier ? 'RSS · 每 30 分鐘更新' : '模擬'}</div>
       </div>
       <div class="card">
         <div class="expandable">${frontier}</div>
