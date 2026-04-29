@@ -18,7 +18,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   // Only handle same-origin app shell requests. Cross-origin (Polygon, FRED,
-  // GNews, GitHub, Fugle, CORS proxies) goes straight to the network so the
+  // RSS feeds, GitHub, Fugle, CORS proxies) goes straight to the network so the
   // browser handles CORS / rate-limit errors directly without polluting the
   // console with SW "Failed to fetch" rejections.
   if (url.origin !== self.location.origin) return;

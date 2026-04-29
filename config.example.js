@@ -32,7 +32,7 @@ const CONFIG = {
   WATCHLIST_TW: ['2330', '2317', '2454', '2382', '2308', '3017'],
 
   // ── CORS Proxy ────────────────────────────────────────────────────────────
-  // FRED 和 GNews 在 deployed origin 上不提供 CORS，需透過 proxy 轉發。
+  // FRED 和 RSS feeds 在 deployed origin 上有 CORS 限制，需透過 proxy 轉發。
   // 預設為 corsproxy.io（免設定）。若有自架 proxy 或其他端點，在此覆寫。
   // CORS_PROXY: 'https://corsproxy.io/?url=',
 
