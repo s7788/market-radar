@@ -249,7 +249,9 @@ async function proxyFetch(targetUrl, options = {}) {
 
 async function fetchFredSingle(seriesId, extraParams = '') {
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
-  const res = await proxyFetch(target, { signal: AbortSignal.timeout(12000) });
+  // FRED API supports CORS natively from any browser origin — call directly,
+  // bypassing the proxy (Cloudflare datacenter IPs are often blocked by FRED).
+  const res = await fetch(target, { signal: AbortSignal.timeout(12000) });
   if (!res.ok) throw new Error(res.status);
   const j = await res.json();
   return (j.observations || []).filter(o => o.value !== '.');
