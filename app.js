@@ -14,15 +14,17 @@ const COMMODITIES = [
   { name: '美元/台幣',   symbol: 'USDTWD', price:  31.48,  unit: '',     change: -0.12, pct: -0.38, icon: '🇹🇼' },
 ];
 
+// FRED 提供 current/prev 真實值，但不提供 consensus forecast；forecast 欄位移除。
+// nextMeeting.date 由 nextFOMC() 動態計算，cutProb/rateExpected 為估計（CME FedWatch 需訂閱）
 const FED_DATA = {
-  nextMeeting: { date: '4月28–29日', rateNow: '3.50–3.75%', rateExpected: '3.50–3.75%', cutProb: 11 },
+  nextMeeting: { rateNow: '3.50–3.75%', rateExpected: '3.50–3.75%', cutProb: 11 },
   indicators: [
-    { label: 'CPI 通膨率',  unit: '%',  current:  3.3,  prev:  2.4,  forecast:  3.1, forecastDate: '5月12日', better: 'down' },
-    { label: '核心 CPI',    unit: '%',  current:  2.6,  prev:  2.5,  forecast:  2.5, forecastDate: '5月12日', better: 'down' },
-    { label: 'PCE 通膨',    unit: '%',  current:  2.5,  prev:  2.3,  forecast:  2.7, forecastDate: '4月30日', better: 'down' },
-    { label: '失業率',      unit: '%',  current:  4.3,  prev:  4.4,  forecast:  4.4, forecastDate: '5月2日',  better: 'down' },
-    { label: 'GDP (QoQ)',   unit: '%',  current:  1.2,  prev:  2.3,  forecast:  1.8, forecastDate: '4月30日', better: 'up'   },
-    { label: '非農就業',    unit: '萬', current: 17.8,  prev: 15.1,  forecast: 14.5, forecastDate: '5月2日',  better: 'up'   },
+    { label: 'CPI 通膨率',  unit: '%',  current:  3.3,  prev:  2.4,  better: 'down' },
+    { label: '核心 CPI',    unit: '%',  current:  2.6,  prev:  2.5,  better: 'down' },
+    { label: 'PCE 通膨',    unit: '%',  current:  2.5,  prev:  2.3,  better: 'down' },
+    { label: '失業率',      unit: '%',  current:  4.3,  prev:  4.4,  better: 'down' },
+    { label: 'GDP (QoQ)',   unit: '%',  current:  1.2,  prev:  2.3,  better: 'up'   },
+    { label: '非農就業',    unit: '萬', current: 17.8,  prev: 15.1,  better: 'up'   },
   ],
 };
 
@@ -53,23 +55,29 @@ const WATCHLIST = [
   { name: '廣達',     symbol: '2382', price:  278.50, change:  6.50, pct:  2.39, market: 'TW' },
 ];
 
+// Mock fallback uses ISO timestamps relative to "now" so render always shows recent times.
+const _now = Date.now();
+const _hoursAgo = h => new Date(_now - h * 3600000).toISOString();
+const _daysAgo  = d => new Date(_now - d * 86400000).toISOString();
 const NEWS = [
-  { tag: 'macro',    label: '總經', title: 'FOMC 會議今晚登場：市場預期維持利率不變，Powell 記者會措辭成關鍵，降息預期推至9月', src: 'Bloomberg', time: '1小時前' },
-  { tag: 'earnings', label: '財報', title: 'Alphabet Q1 2026 EPS $2.81 超預期 11%，Google Cloud 季收入達 127億美元創新高，盤後漲 6.2%', src: 'CNBC', time: '3小時前' },
-  { tag: 'earnings', label: '財報', title: 'Microsoft Q3 FY2026 盤後：Azure 成長加速至 35%，Copilot 企業訂閱數突破 5000 萬，EPS $3.46 勝預期', src: 'WSJ', time: '5小時前' },
-  { tag: 'ai',       label: 'AI', title: 'NVIDIA GB300 NVL72 伺服器機櫃開始交貨，台積電 CoWoS-L 產能全數搶訂，AI算力需求再創新高', src: 'Reuters', time: '7小時前' },
-  { tag: 'tw',       label: '台股', title: '台積電 Q1 2026 法說：EPS NT$16.4 優於預期，全年資本支出上修至 400–420 億美元，AI CoWoS 佔比 35%', src: '財訊', time: '昨天' },
-  { tag: 'us',       label: '美股', title: 'S&P 500 本週財報季衝刺：Apple、Amazon 明日盤後公布，選擇權隱含波動率急升', src: 'Barron\'s', time: '昨天' },
-  { tag: 'macro',    label: '總經', title: 'PCE 通膨數據周三公布在即：市場預估年增 2.7%，若超預期將壓縮年內降息空間', src: 'FT', time: '昨天' },
+  { tag: 'macro',    label: '總經', title: 'FOMC 會議今晚登場：市場預期維持利率不變，Powell 記者會措辭成關鍵，降息預期推至9月', src: 'Bloomberg', date: _hoursAgo(1) },
+  { tag: 'earnings', label: '財報', title: 'Alphabet Q1 2026 EPS $2.81 超預期 11%，Google Cloud 季收入達 127億美元創新高，盤後漲 6.2%', src: 'CNBC', date: _hoursAgo(3) },
+  { tag: 'earnings', label: '財報', title: 'Microsoft Q3 FY2026 盤後：Azure 成長加速至 35%，Copilot 企業訂閱數突破 5000 萬，EPS $3.46 勝預期', src: 'WSJ', date: _hoursAgo(5) },
+  { tag: 'ai',       label: 'AI', title: 'NVIDIA GB300 NVL72 伺服器機櫃開始交貨，台積電 CoWoS-L 產能全數搶訂，AI算力需求再創新高', src: 'Reuters', date: _hoursAgo(7) },
+  { tag: 'tw',       label: '台股', title: '台積電 Q1 2026 法說：EPS NT$16.4 優於預期，全年資本支出上修至 400–420 億美元，AI CoWoS 佔比 35%', src: '財訊', date: _hoursAgo(20) },
+  { tag: 'us',       label: '美股', title: 'S&P 500 本週財報季衝刺：Apple、Amazon 明日盤後公布，選擇權隱含波動率急升', src: 'Barron\'s', date: _hoursAgo(24) },
+  { tag: 'macro',    label: '總經', title: 'PCE 通膨數據周三公布在即：市場預估年增 2.7%，若超預期將壓縮年內降息空間', src: 'FT', date: _hoursAgo(30) },
 ];
 
+// 使用 ISO 日期，render 時自動過濾過期項目並轉中文顯示（避免「上月財報」殘留）
 const EARNINGS_CALENDAR = [
-  { day: '28', mon: '四月', company: 'Apple (AAPL)',     detail: 'Q2 2026 盤後公告', est: '$1.58', estLabel: '預估EPS' },
-  { day: '29', mon: '四月', company: 'Amazon (AMZN)',    detail: 'Q1 2026 盤後公告', est: '$1.29', estLabel: '預估EPS' },
-  { day: '30', mon: '四月', company: 'Microsoft (MSFT)', detail: 'Q3 FY2026 盤後', est: '$3.21', estLabel: '預估EPS' },
-  { day: '01', mon: '五月', company: '台積電 (2330)',    detail: '2026 Q1法說會',    est: 'NT$14.5', estLabel: '預估EPS' },
-  { day: '05', mon: '五月', company: 'NVIDIA (NVDA)',    detail: 'Q1 FY2027 盤後',   est: '$5.81', estLabel: '預估EPS' },
+  { date: '2026-04-28', company: 'Apple (AAPL)',     detail: 'Q2 2026 盤後公告',  est: '$1.58',   estLabel: '預估EPS' },
+  { date: '2026-04-29', company: 'Amazon (AMZN)',    detail: 'Q1 2026 盤後公告',  est: '$1.29',   estLabel: '預估EPS' },
+  { date: '2026-04-30', company: 'Microsoft (MSFT)', detail: 'Q3 FY2026 盤後',    est: '$3.21',   estLabel: '預估EPS' },
+  { date: '2026-05-01', company: '台積電 (2330)',    detail: '2026 Q1法說會',     est: 'NT$14.5', estLabel: '預估EPS' },
+  { date: '2026-05-05', company: 'NVIDIA (NVDA)',    detail: 'Q1 FY2027 盤後',    est: '$5.81',   estLabel: '預估EPS' },
 ];
+const ZH_MONTHS = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
 
 // AI Rotation Phases
 const AI_PHASES = [
@@ -123,10 +131,6 @@ const AI_PHASES = [
   },
 ];
 
-// Mock fallback dates use ISO timestamps relative to "now" so they always
-// render as recent (天前 / 週前) rather than a fixed year-old date.
-const _now = Date.now();
-const _daysAgo = d => new Date(_now - d * 86400000).toISOString();
 const AI_FRONTIER = [
   { logo: '🤖', brand: 'Anthropic / Claude', headline: 'Anthropic 發表 Claude Opus 4.7 與 Haiku 4.5，推理速度與工具使用能力大幅躍進', date: _daysAgo(2) },
   { logo: '🔮', brand: 'OpenAI', headline: 'OpenAI 推出 GPT-5 Turbo，context window 擴大至 2M token，多步驟代理任務表現領先', date: _daysAgo(4) },
@@ -136,34 +140,99 @@ const AI_FRONTIER = [
 ];
 
 const GEO_NEWS = [
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump threatens additional 50% tariffs on Chinese goods unless Beijing resumes trade talks by May 9 deadline', src: 'Reuters', date: '2026-04-27T06:15:00Z' },
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump demands Fed cut rates by 75bp before July, posts on Truth Social: "Powell is killing the economy with stubbornness"', src: 'Bloomberg', date: '2026-04-27T04:30:00Z' },
-  { topic: 'china', icon: '🇨🇳', label: '中美局勢', headline: 'China suspends Boeing aircraft deliveries, restricts rare earth exports in tit-for-tat response to US chip controls', src: 'FT', date: '2026-04-26T22:00:00Z' },
-  { topic: 'china', icon: '🇨🇳', label: '中美局勢', headline: 'TSMC restricted from supplying advanced 2nm chips to Huawei-linked firms; US expands Entity List to 47 new Chinese entities', src: 'WSJ', date: '2026-04-26T18:45:00Z' },
-  { topic: 'iran',  icon: '🌍',  label: '中東局勢', headline: 'US-Iran nuclear negotiations break down; White House signals military options "back on the table" as Hormuz tensions escalate', src: 'AP', date: '2026-04-25T14:00:00Z' },
-  { topic: 'russia',icon: '🛡️', label: '俄烏局勢', headline: 'Ukraine drone strike hits Russian oil terminal near Novorossiysk; Brent crude spikes 2.4% on supply disruption fears', src: 'Reuters', date: '2026-04-25T08:20:00Z' },
-  { topic: 'trump', icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order to fast-track domestic critical minerals permits, targeting 90% reduction in China rare earth dependency by 2028', src: 'WSJ', date: '2026-04-24T20:00:00Z' },
+  { topic: 'trump',  icon: '🇺🇸', label: '川普言論', headline: 'Trump threatens additional 50% tariffs on Chinese goods unless Beijing resumes trade talks by May 9 deadline', src: 'Reuters',   date: _hoursAgo(8)  },
+  { topic: 'trump',  icon: '🇺🇸', label: '川普言論', headline: 'Trump demands Fed cut rates by 75bp before July, posts on Truth Social: "Powell is killing the economy with stubbornness"', src: 'Bloomberg', date: _hoursAgo(10) },
+  { topic: 'china',  icon: '🇨🇳', label: '中美局勢', headline: 'China suspends Boeing aircraft deliveries, restricts rare earth exports in tit-for-tat response to US chip controls', src: 'FT',        date: _hoursAgo(28) },
+  { topic: 'china',  icon: '🇨🇳', label: '中美局勢', headline: 'TSMC restricted from supplying advanced 2nm chips to Huawei-linked firms; US expands Entity List to 47 new Chinese entities', src: 'WSJ',       date: _hoursAgo(34) },
+  { topic: 'iran',   icon: '🌍',  label: '中東局勢', headline: 'US-Iran nuclear negotiations break down; White House signals military options "back on the table" as Hormuz tensions escalate', src: 'AP',        date: _hoursAgo(50) },
+  { topic: 'russia', icon: '🛡️', label: '俄烏局勢', headline: 'Ukraine drone strike hits Russian oil terminal near Novorossiysk; Brent crude spikes 2.4% on supply disruption fears', src: 'Reuters',   date: _hoursAgo(58) },
+  { topic: 'trump',  icon: '🇺🇸', label: '川普言論', headline: 'Trump signs executive order to fast-track domestic critical minerals permits, targeting 90% reduction in China rare earth dependency by 2028', src: 'WSJ',       date: _hoursAgo(72) },
 ];
 
 const TW_STOCKS_PE = [
-  { rank: 1,  name: '台積電',  code: '2330', pe: 22.4, peLevel: 'mid', reason: '全球AI晶片製造龍頭，CoWoS持續擴產', sector: '半導體' },
-  { rank: 2,  name: '聯發科',  code: '2454', pe: 16.8, peLevel: 'low', reason: '邊緣AI SoC市佔率提升，車用電子高成長', sector: 'IC設計' },
-  { rank: 3,  name: '廣達',    code: '2382', pe: 13.2, peLevel: 'low', reason: 'AI伺服器出貨強勁，雲端大廠訂單能見度高', sector: 'ODM' },
-  { rank: 4,  name: '鴻海',    code: '2317', pe: 11.5, peLevel: 'low', reason: '電動車轉型加速，AI伺服器佔比持續提升', sector: 'EMS' },
-  { rank: 5,  name: '緯穎',    code: '6669', pe: 18.9, peLevel: 'mid', reason: 'CSP客戶AI基建採購爆量，液冷伺服器導入', sector: 'ODM' },
-  { rank: 6,  name: '台達電',  code: '2308', pe: 21.3, peLevel: 'mid', reason: '電源管理/散熱雙引擎，資料中心電力成長', sector: '電源零件' },
-  { rank: 7,  name: '奇鋐',    code: '3017', pe: 19.7, peLevel: 'mid', reason: 'AI伺服器散熱解決方案，液冷市場份額擴大', sector: '散熱' },
-  { rank: 8,  name: '創意電子', code: '3443', pe: 24.1, peLevel: 'mid', reason: 'AI ASIC設計服務需求旺，台積電生態系受益', sector: 'IC設計服務' },
+  { rank: 1, name: '台積電',   code: '2330', pe: 22.4, peLevel: 'mid', reason: '全球AI晶片製造龍頭，CoWoS持續擴產，2nm良率領先業界', sector: '半導體',    dividendYield: null, pbRatio: null },
+  { rank: 2, name: '聯發科',   code: '2454', pe: 16.8, peLevel: 'low', reason: '邊緣AI SoC市佔率提升，車用電子高成長，天璣9400導入旗艦機', sector: 'IC設計',    dividendYield: null, pbRatio: null },
+  { rank: 3, name: '廣達',     code: '2382', pe: 13.2, peLevel: 'low', reason: 'AI伺服器出貨強勁，雲端大廠訂單能見度高至2027年', sector: 'ODM',       dividendYield: null, pbRatio: null },
+  { rank: 4, name: '鴻海',     code: '2317', pe: 11.5, peLevel: 'low', reason: '電動車轉型加速，AI伺服器佔比持續提升，GB200 NVL72 主要組裝商', sector: 'EMS',       dividendYield: null, pbRatio: null },
+  { rank: 5, name: '緯穎',     code: '6669', pe: 18.9, peLevel: 'mid', reason: 'CSP客戶AI基建採購爆量，液冷伺服器導入中', sector: 'ODM',       dividendYield: null, pbRatio: null },
+  { rank: 6, name: '台達電',   code: '2308', pe: 21.3, peLevel: 'mid', reason: '電源管理/散熱雙引擎，資料中心電力需求高成長', sector: '電源零件',  dividendYield: null, pbRatio: null },
+  { rank: 7, name: '奇鋐',     code: '3017', pe: 19.7, peLevel: 'mid', reason: 'AI伺服器散熱解決方案領先，液冷市場份額持續擴大', sector: '散熱',      dividendYield: null, pbRatio: null },
+  { rank: 8, name: '創意電子', code: '3443', pe: 24.1, peLevel: 'mid', reason: 'AI ASIC設計服務需求旺，台積電生態系深度受益', sector: 'IC設計服務', dividendYield: null, pbRatio: null },
 ];
 
-// ML Clock: 0=Recovery 1=Expansion 2=Slowdown 3=Contraction
-// Current: between Recovery(0) and Expansion(1), angle ~45 degrees
-const ML_CLOCK_POSITION = 0.75; // 0-3 clock position (0=12點=Recovery起點)
+// 各產業本益比合理區間（依台灣市場歷史均值設定）
+const PE_THRESHOLDS = {
+  '半導體':    { low: 20, high: 30 },
+  'IC設計':    { low: 15, high: 25 },
+  'ODM':       { low: 12, high: 20 },
+  'EMS':       { low: 10, high: 18 },
+  '電源零件':  { low: 16, high: 26 },
+  '散熱':      { low: 15, high: 25 },
+  'IC設計服務':{ low: 18, high: 28 },
+};
+
+// ── ML Clock 動態計算 ────────────────────────────────────────────────────
+// 位置 0-4：0=12 點=復甦起點、1=3 點=擴張起點、2=6 點=過熱起點、3=9 點=衰退起點
+// 邏輯：CPI ↓ + GDP ↑ = 復甦；CPI ↑ + GDP ↑ = 擴張；CPI ↑ + GDP ↓ = 過熱；CPI ↓ + GDP ↓ = 衰退
+function calcMLClockPosition() {
+  const cpi = FED_DATA.indicators[0]; // CPI 通膨率
+  const gdp = FED_DATA.indicators[4]; // GDP (QoQ)
+  if (cpi.current == null || cpi.prev == null || gdp.current == null || gdp.prev == null) return 0.75;
+
+  const cpiUp = cpi.current > cpi.prev;
+  const gdpUp = gdp.current > gdp.prev;
+
+  let quadrant;
+  if (!cpiUp && gdpUp)      quadrant = 0; // 復甦
+  else if (cpiUp && gdpUp)  quadrant = 1; // 擴張
+  else if (cpiUp && !gdpUp) quadrant = 2; // 過熱
+  else                      quadrant = 3; // 衰退
+
+  // Position within quadrant 0-1 based on combined magnitude of moves
+  const cpiMag = Math.min(1, Math.abs(cpi.current - cpi.prev) / 1.0);
+  const gdpMag = Math.min(1, Math.abs(gdp.current - gdp.prev) / 1.5);
+  return quadrant + (cpiMag + gdpMag) / 2;
+}
+
+const CYCLE_PHASE_NAMES = ['復甦', '擴張', '過熱', '衰退'];
+function getCyclePhaseLabel() {
+  const pos = calcMLClockPosition();
+  const cur = CYCLE_PHASE_NAMES[Math.floor(pos) % 4];
+  const next = CYCLE_PHASE_NAMES[(Math.floor(pos) + 1) % 4];
+  const intra = pos - Math.floor(pos);
+  if (intra < 0.33) return `${cur}初期`;
+  if (intra < 0.66) return `${cur}中段`;
+  return `${cur} → ${next} 過渡期`;
+}
+
+// ── 市場熱度合成指數（0-100，整合 INDICES + VIX + 散戶指標） ──────────────
+function calcHeatScore() {
+  let score = 50;
+  // 主要指數動能：總漲跌幅 × 4，clamp ±15
+  const totalPct = INDICES.reduce((s, i) => s + (i.pct || 0), 0);
+  score += Math.max(-15, Math.min(15, totalPct * 4));
+  // VIX 反向：低恐慌 = 熱
+  const vix = COMMODITIES.find(c => c.symbol === 'VIX')?.price ?? 18;
+  if (vix < 15)      score += 10;
+  else if (vix < 20) score += 5;
+  else if (vix > 30) score -= 10;
+  else if (vix > 25) score -= 5;
+  // 散戶融資水位（越高越熱）
+  const m = RETAIL_DATA?.margin?.raw ?? 50;
+  if (m > 70)      score += 10;
+  else if (m > 50) score += 5;
+  else if (m < 35) score -= 5;
+  // 成交量（放大=熱）
+  const v = RETAIL_DATA?.vol?.raw ?? 50;
+  if (v > 70)      score += 5;
+  else if (v < 35) score -= 5;
+  return Math.max(5, Math.min(95, Math.round(score)));
+}
 
 // ── Config Helpers ────────────────────────────────────────────────────────
 
 // Tracks which data sources are currently live (vs mock). String = source label, false = mock.
-const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false, geoNews: false, marketNews: false, retail: false };
+const LIVE_SOURCES = { watchlist: false, fed: false, market: false, aiFrontier: false, geoNews: false, marketNews: false, retail: false, twPE: false };
 
 // Returns true only if the key exists in CONFIG and is not a placeholder
 function cfg(key) {
@@ -221,16 +290,15 @@ async function fetchFugleQuote(symbol) {
   return res.json();
 }
 
-// Some APIs do not grant CORS on deployed (non-localhost) origins,
-// so external API calls are routed through a proxy.
+// FRED and RSS feeds do not grant CORS from deployed (non-localhost) origins,
+// so these calls are routed through a proxy.
 // Proxies are tried in order; the first one that returns a non-403 response wins.
 // Override via CONFIG.CORS_PROXY to use a single custom proxy exclusively.
 const _CORS_PROXIES = [
-  'https://api.allorigins.win/raw?url=',   // returns raw body; works for JSON & XML
   'https://corsproxy.io/?url=',
+  'https://api.allorigins.win/raw?url=',
   'https://thingproxy.freeboard.io/fetch/',
 ];
-const CORS_PROXY = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY) ? CONFIG.CORS_PROXY : _CORS_PROXIES[0];
 
 async function proxyFetch(targetUrl, options = {}) {
   const proxies = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY)
@@ -249,9 +317,7 @@ async function proxyFetch(targetUrl, options = {}) {
 
 async function fetchFredSingle(seriesId, extraParams = '') {
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
-  // FRED API supports CORS natively from any browser origin — call directly,
-  // bypassing the proxy (Cloudflare datacenter IPs are often blocked by FRED).
-  const res = await fetch(target, { signal: AbortSignal.timeout(12000) });
+  const res = await proxyFetch(target, { signal: AbortSignal.timeout(12000) });
   if (!res.ok) throw new Error(res.status);
   const j = await res.json();
   return (j.observations || []).filter(o => o.value !== '.');
@@ -298,27 +364,66 @@ function applyOHLC(arr, idx, d) {
 async function fetchLiveMarketData() {
   const hits = [];
 
-  if (cfg('POLYGON_API_KEY')) {
-    await Promise.allSettled([
-      fetchPolygonPrev('I:SPX'   ).then(d => { applyOHLC(INDICES,     0, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('I:NDX'   ).then(d => { applyOHLC(INDICES,     1, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('I:DJI'   ).then(d => { applyOHLC(INDICES,     2, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('C:BRTUSD').then(d => { applyOHLC(COMMODITIES, 0, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('C:XAUUSD').then(d => { applyOHLC(COMMODITIES, 1, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('I:VIX'   ).then(d => { applyOHLC(COMMODITIES, 2, d); if (d) hits.push(1); }).catch(() => {}),
-      fetchPolygonPrev('C:USDTWD').then(d => { applyOHLC(COMMODITIES, 3, d); if (d) hits.push(1); }).catch(() => {}),
-    ]);
-  }
+  // Helper: apply a Twelve Data quote object to an array slot
+  const applyTD = (d, arr, idx) => {
+    if (!d || d.code || !d.close) return false;
+    const close = +d.close, open = +(d.open ?? d.close);
+    arr[idx].price  = close;
+    arr[idx].change = +(close - open).toFixed(2);
+    arr[idx].pct    = +parseFloat(d.percent_change ?? 0).toFixed(2);
+    return true;
+  };
 
-  if (cfg('FUGLE_API_KEY')) {
-    await fetchFugleQuote('IX0001').then(d => {
-      if (!d) return;
-      INDICES[3].price  = d.closePrice ?? d.lastPrice ?? INDICES[3].price;
-      INDICES[3].change = d.change ?? INDICES[3].change;
-      INDICES[3].pct    = d.changePercent ?? INDICES[3].pct;
-      hits.push(1);
-    }).catch(() => {});
-  }
+  await Promise.allSettled([
+
+    // ── Twelve Data batch: all indices + commodities in one call ───────────
+    // Free tier: 800 credits/day, 8/min; this batch costs 7 credits per call
+    // Symbols: SPX / NDX / DJI = US indices; VIX = volatility;
+    //          XAU/USD = gold; USD/TWD = FX; XBR/USD = Brent crude
+    cfg('TWELVE_DATA_API_KEY') && (async () => {
+      try {
+        const syms = 'SPX,NDX,DJI,VIX,XAU/USD,USD/TWD,XBR/USD';
+        const res = await fetch(
+          `https://api.twelvedata.com/quote?symbol=${syms}&dp=2&apikey=${CONFIG.TWELVE_DATA_API_KEY}`,
+          { signal: AbortSignal.timeout(10000) }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (applyTD(data['SPX'],     INDICES,     0)) hits.push(1);
+        if (applyTD(data['NDX'],     INDICES,     1)) hits.push(1);
+        if (applyTD(data['DJI'],     INDICES,     2)) hits.push(1);
+        if (applyTD(data['XBR/USD'], COMMODITIES, 0)) hits.push(1);
+        if (applyTD(data['XAU/USD'], COMMODITIES, 1)) hits.push(1);
+        if (applyTD(data['VIX'],     COMMODITIES, 2)) hits.push(1);
+        if (applyTD(data['USD/TWD'], COMMODITIES, 3)) hits.push(1);
+      } catch (_) {}
+    })(),
+
+    // ── Polygon fallback: indices + gold + VIX + FX (if Twelve Data fails) ─
+    cfg('POLYGON_API_KEY') && (async () => {
+      if (hits.length >= 4) return; // Twelve Data already succeeded
+      await Promise.allSettled([
+        fetchPolygonPrev('I:SPX'   ).then(d => { applyOHLC(INDICES,     0, d); if (d) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('I:NDX'   ).then(d => { applyOHLC(INDICES,     1, d); if (d) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('I:DJI'   ).then(d => { applyOHLC(INDICES,     2, d); if (d) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('C:XAUUSD').then(d => { applyOHLC(COMMODITIES, 1, d); if (d) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('I:VIX'   ).then(d => { applyOHLC(COMMODITIES, 2, d); if (d) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('C:USDTWD').then(d => { applyOHLC(COMMODITIES, 3, d); if (d) hits.push(1); }).catch(() => {}),
+      ]);
+    })(),
+
+    // ── Fugle: 台股加權指數 ────────────────────────────────────────────────
+    cfg('FUGLE_API_KEY') && (async () => {
+      await fetchFugleQuote('IX0001').then(d => {
+        if (!d) return;
+        INDICES[3].price  = d.closePrice ?? d.lastPrice ?? INDICES[3].price;
+        INDICES[3].change = d.change ?? INDICES[3].change;
+        INDICES[3].pct    = d.changePercent ?? INDICES[3].pct;
+        hits.push(1);
+      }).catch(() => {});
+    })(),
+
+  ]);
 
   if (hits.length) LIVE_SOURCES.market = true;
 }
@@ -600,6 +705,86 @@ async function fetchMarketNews() {
   }
 }
 
+// ── TWSE 本益比 / 殖利率 / 股價淨值比 (BWIBBU) ───────────────────────────
+// 來源：www.twse.com.tw/rwd/zh/afterTrading/BWIBBU（同 BFI82U 路徑模式）
+// 回傳格式：{ stat:'OK', fields:[...], data:[[col0,col1,...], ...] }
+// 需帶 date=YYYYMMDD&selectType=ALL；今日資料收盤後才發布，同時嘗試今天與昨天。
+// 快取 4 小時：本益比日內不變，命中率高。
+const TW_PE_CACHE_KEY = 'tw_pe_v2';
+const TW_PE_CACHE_TTL = 4 * 60 * 60 * 1000;
+
+function _parseBWIBBU(j) {
+  if (!j || j.stat !== 'OK' || !Array.isArray(j.data) || !j.data.length) return null;
+  const fields = Array.isArray(j.fields) ? j.fields : [];
+  const fi = kw => fields.findIndex(f => String(f).includes(kw));
+  const codeI = fi('代號'), peI = fi('本益比'), dyI = fi('殖利率'), pbI = fi('淨值比');
+  if (codeI < 0 || peI < 0) return null;
+  const map = {};
+  for (const row of j.data) {
+    const code = String(row[codeI] ?? '').trim();
+    if (!code) continue;
+    const pe = parseFloat(row[peI]);
+    const dy = dyI >= 0 ? parseFloat(row[dyI]) : NaN;
+    const pb = pbI >= 0 ? parseFloat(row[pbI]) : NaN;
+    map[code] = {
+      pe: isNaN(pe) || pe <= 0 ? null : +pe.toFixed(1),
+      dy: isNaN(dy) || dy < 0  ? null : +dy.toFixed(2),
+      pb: isNaN(pb) || pb <= 0 ? null : +pb.toFixed(2),
+    };
+  }
+  return Object.keys(map).length ? map : null;
+}
+
+async function fetchTWStocksPE() {
+  try {
+    const cached = localStorage.getItem(TW_PE_CACHE_KEY);
+    if (cached) {
+      const { peMap, ts } = JSON.parse(cached);
+      if (Date.now() - ts < TW_PE_CACHE_TTL) { applyTWPEData(peMap); return; }
+    }
+  } catch (_) {}
+
+  const fmtDate = d => d.toISOString().slice(0, 10).replace(/-/g, '');
+  const fetchDay = async date => {
+    const url = `https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU?response=json&date=${date}&selectType=ALL`;
+    const j = await proxyFetch(url, { signal: AbortSignal.timeout(12000) })
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+    return _parseBWIBBU(j);
+  };
+
+  // 今日和昨日同時發出請求（今日收盤前資料未發布，昨日作為保底）
+  const now = new Date();
+  const [todayMap, yestMap] = await Promise.allSettled([
+    fetchDay(fmtDate(now)),
+    fetchDay(fmtDate(new Date(+now - 86400000))),
+  ]);
+  const peMap = (todayMap.status === 'fulfilled' && todayMap.value)
+             || (yestMap.status  === 'fulfilled' && yestMap.value)
+             || null;
+
+  if (peMap) {
+    try { localStorage.setItem(TW_PE_CACHE_KEY, JSON.stringify({ peMap, ts: Date.now() })); } catch (_) {}
+    applyTWPEData(peMap);
+  }
+}
+
+function applyTWPEData(peMap) {
+  let updated = false;
+  for (const s of TW_STOCKS_PE) {
+    const d = peMap[s.code];
+    if (!d) continue;
+    if (d.pe !== null) {
+      s.pe = d.pe;
+      const t = PE_THRESHOLDS[s.sector] ?? { low: 15, high: 25 };
+      s.peLevel = s.pe < t.low ? 'low' : s.pe > t.high ? 'high' : 'mid';
+    }
+    s.dividendYield = d.dy;
+    s.pbRatio       = d.pb;
+    updated = true;
+  }
+  if (updated) LIVE_SOURCES.twPE = true;
+}
+
 async function fetchAndUpdateLiveData() {
   const tasks = [];
 
@@ -621,6 +806,30 @@ async function fetchAndUpdateLiveData() {
         }
       })
     );
+  } else if (cfg('TWELVE_DATA_API_KEY')) {
+    const syms = CONFIG.WATCHLIST_US ?? ['AAPL', 'NVDA', 'MSFT', 'META'];
+    tasks.push((async () => {
+      try {
+        const res = await fetch(
+          `https://api.twelvedata.com/quote?symbol=${syms.join(',')}&dp=2&apikey=${CONFIG.TWELVE_DATA_API_KEY}`,
+          { signal: AbortSignal.timeout(10000) }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const live = syms.map(sym => {
+          const d = syms.length === 1 ? data : data[sym];
+          if (!d || d.code || !d.close) return null;
+          const close = +d.close, open = +(d.open ?? d.close);
+          return { name: d.name || US_NAMES[sym] || sym, symbol: sym, price: close, change: +(close - open).toFixed(2), pct: +parseFloat(d.percent_change ?? 0).toFixed(2), market: 'US' };
+        }).filter(Boolean);
+        if (live.length) {
+          const twOnly = WATCHLIST.filter(w => w.market === 'TW');
+          WATCHLIST.length = 0;
+          WATCHLIST.push(...live, ...twOnly);
+          LIVE_SOURCES.watchlist = true;
+        }
+      } catch (_) {}
+    })());
   }
 
   if (cfg('FUGLE_API_KEY')) {
@@ -648,39 +857,41 @@ async function fetchAndUpdateLiveData() {
   tasks.push(fetchGeoNews());
   tasks.push(fetchMarketNews());
   tasks.push(fetchTWSERetailData());
+  tasks.push(fetchTWStocksPE());
   await Promise.allSettled(tasks);
 }
 
 const RETAIL_DATA = {
-  margin: { val: '—',    raw: 50, label: '融資餘額',      note: '載入中…' },
-  short:  { val: '—',    raw: 50, label: '融券餘額',      note: '載入中…' },
-  vol:    { val: '—',    raw: 50, label: '成交量 vs 均量', note: '載入中…' },
-  account:{ val: '—',   raw: 50, label: '本週新開戶數',   note: '資料待提供' },
+  margin:  { val: '—', raw: 50, label: '融資餘額',    note: '載入中…' },
+  short:   { val: '—', raw: 50, label: '融券餘額',    note: '載入中…' },
+  vol:     { val: '—', raw: 50, label: '成交量 vs 均量', note: '載入中…' },
+  foreign: { val: '—', raw: 50, label: '外資買賣超',  note: '載入中…' },
 };
 
 // ── TWSE Retail Indicators ────────────────────────────────────────────────
-// openapi.twse.com.tw blocks cross-origin requests from deployed domains (CORS error).
-// All calls are routed through proxyFetch which tries allorigins.win first.
+// openapi.twse.com.tw returns 200 OK but omits Access-Control-Allow-Origin,
+// so browser-side CORS is blocked. All calls are routed through proxyFetch.
 // Response format is an array of objects with Chinese named keys.
 async function fetchTWSERetailData() {
   const toNum = s => +(String(s ?? '').replace(/,/g, ''));
 
   await Promise.allSettled([
 
-    // ── 融資 / 融券 (MI_MARGN) ────────────────────────────────────────────
+    // ── 融資 / 融券 (MI_MARGN) — sum ALL stocks for market-wide total ─────
     (async () => {
-      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN', { signal: AbortSignal.timeout(12000) })
+      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN', { signal: AbortSignal.timeout(15000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
       if (!Array.isArray(j) || !j.length) return;
 
-      const row = j[j.length - 1]; // most-recent row
-      const keys = Object.keys(row);
+      const keys = Object.keys(j[0]);
+      // Exact field names from TWSE: 融資今日餘額 (千元), 融券今日餘額 (張)
+      const marginKey = keys.find(k => k.includes('融資今日餘額')) ?? keys.find(k => /融資.*餘額/.test(k) && !/前日/.test(k));
+      const shortKey  = keys.find(k => k.includes('融券今日餘額')) ?? keys.find(k => /融券.*餘額/.test(k) && !/前日/.test(k));
 
-      // 融資今日餘額(千元) ÷ 100,000 → 億元
-      const marginKey = keys.find(k => /融資.*餘額/.test(k) && !/前日/.test(k));
       if (marginKey) {
-        const bil = Math.round(toNum(row[marginKey]) / 100000);
-        if (bil > 200) {
+        const total = j.reduce((s, r) => s + toNum(r[marginKey]), 0); // 千元
+        const bil = Math.round(total / 100000); // → 億元
+        if (bil > 500) {
           RETAIL_DATA.margin.val  = `${bil.toLocaleString()}億`;
           RETAIL_DATA.margin.raw  = Math.min(100, Math.round(bil / 60));
           RETAIL_DATA.margin.note = bil > 4200 ? '融資水位偏高' : bil > 2800 ? '融資水位適中' : '融資水位偏低';
@@ -688,10 +899,9 @@ async function fetchTWSERetailData() {
         }
       }
 
-      // 融券今日餘額(千股) ÷ 10,000 → 萬張 (1張=1千股)
-      const shortKey = keys.find(k => /融券.*餘額/.test(k) && !/前日/.test(k));
       if (shortKey) {
-        const wanLots = Math.round(toNum(row[shortKey]) / 10000);
+        const total = j.reduce((s, r) => s + toNum(r[shortKey]), 0); // 張
+        const wanLots = Math.round(total / 10000); // → 萬張
         if (wanLots > 0) {
           RETAIL_DATA.short.val  = `${wanLots.toLocaleString()}萬張`;
           RETAIL_DATA.short.raw  = Math.min(100, Math.round(wanLots / 1.5));
@@ -701,28 +911,43 @@ async function fetchTWSERetailData() {
       }
     })(),
 
-    // ── 成交量 vs 90日均量 (MI_INDEX) ────────────────────────────────────
+    // ── 成交量 vs 月均量 (FMTQIK) ────────────────────────────────────────
+    // FMTQIK returns current-month daily rows; 成交金額 is in 元
     (async () => {
-      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX', { signal: AbortSignal.timeout(12000) })
+      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK', { signal: AbortSignal.timeout(12000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
       if (!Array.isArray(j) || !j.length) return;
 
-      // Prefer 加權股價指數 row; fall back to first row
-      const mainRow = j.find(r => /加權/.test(String(r['指數'] ?? r['Index'] ?? ''))) ?? j[0];
-      const amtKey  = Object.keys(mainRow).find(k => /成交金額/.test(k));
-      if (!amtKey) return;
+      const bils = j.map(r => Math.round(toNum(r['成交金額']) / 1e8)).filter(v => v > 100);
+      if (!bils.length) return;
+      const bil = bils[bils.length - 1]; // today (last row)
+      const avg = Math.round(bils.reduce((s, v) => s + v, 0) / bils.length); // this month's avg
 
-      const raw = toNum(mainRow[amtKey]);
-      // 成交金額 may be in 元 or 億元; detect by magnitude
-      const bil = raw > 1_000_000 ? Math.round(raw / 1e8) : Math.round(raw);
-      if (!bil || bil < 50) return;
-
-      const AVG_90D = 2500; // 億 — typical TWSE 90-day average
-      const pct = Math.round((bil / AVG_90D - 1) * 100);
+      const pct = Math.round((bil / avg - 1) * 100);
       RETAIL_DATA.vol.val  = (pct >= 0 ? `+${pct}` : `${pct}`) + '%';
-      RETAIL_DATA.vol.raw  = Math.min(100, Math.max(5, Math.round(bil / AVG_90D * 50)));
-      RETAIL_DATA.vol.note = `成交${bil.toLocaleString()}億，基準${AVG_90D}億`;
+      RETAIL_DATA.vol.raw  = Math.min(100, Math.max(5, Math.round(bil / avg * 50)));
+      RETAIL_DATA.vol.note = `今日${bil.toLocaleString()}億，月均${avg.toLocaleString()}億`;
       LIVE_SOURCES.retail  = true;
+    })(),
+
+    // ── 外資買賣超 (BFI82U via www.twse.com.tw) ──────────────────────────
+    // Response: { stat:'OK', data:[['單位名稱','買進金額','賣出金額','買賣差額'], ...] }
+    // Amounts are in 元; divide by 1e8 to get 億元
+    (async () => {
+      const j = await proxyFetch('https://www.twse.com.tw/rwd/zh/fund/BFI82U?response=json', { signal: AbortSignal.timeout(12000) })
+        .then(r => r.ok ? r.json() : null).catch(() => null);
+      if (!j || j.stat !== 'OK' || !Array.isArray(j.data)) return;
+
+      // data row: [單位名稱, 買進金額, 賣出金額, 買賣差額]
+      const row = j.data.find(r => /外資及陸資/.test(String(r[0] ?? '')) && !/自營商/.test(String(r[0] ?? '')));
+      if (!row || row.length < 4) return;
+
+      const net = toNum(row[3]); // 元
+      const bil = Math.round(net / 1e8); // → 億元
+      RETAIL_DATA.foreign.val  = (bil >= 0 ? `+${bil.toLocaleString()}` : `${bil.toLocaleString()}`) + '億';
+      RETAIL_DATA.foreign.raw  = Math.min(100, Math.max(0, 50 + Math.round(bil / 4)));
+      RETAIL_DATA.foreign.note = bil > 30 ? '外資今日淨買超，法人偏多' : bil < -30 ? '外資今日淨賣超，法人偏空' : '外資今日買賣持平';
+      LIVE_SOURCES.retail = true;
     })()
   ]);
 }
@@ -732,7 +957,8 @@ async function fetchTWSERetailData() {
 function fmtChange(pct, v) {
   const sign = v >= 0 ? '+' : '';
   const cls = v >= 0 ? 'up' : 'down';
-  return `<span class="${cls}">${sign}${pct.toFixed(2)}%</span>`;
+  const absStr = v != null ? `<span class="chg-abs ${cls}" style="opacity:.65;font-size:.7rem;margin-left:4px">${sign}${v.toFixed(2)}</span>` : '';
+  return `<span class="${cls}">${sign}${pct.toFixed(2)}%</span>${absStr}`;
 }
 
 function fmtPrice(n) {
@@ -898,7 +1124,7 @@ function renderOverview() {
     return `<${tag} class="news-item"${href}${style}>
       <div><span class="news-tag tag-${n.tag}">${n.label}</span></div>
       <div class="news-headline">${n.title}</div>
-      <div class="news-meta">${n.src} · ${n.time}</div>
+      <div class="news-meta">${n.src} · ${n.time ?? (n.date ? relativeDate(n.date) : '')}</div>
     </${tag}>`;
   }).join('');
   const newsBtn = newsSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${newsSlice.length})">展開全部 ${newsSlice.length} 筆 ▼</button>` : '';
@@ -931,10 +1157,7 @@ function renderOverview() {
     const prevArrow = prevDiff > 0 ? '▲' : prevDiff < 0 ? '▼' : '—';
     const prevGood = (ind.better === 'down' && prevDiff <= 0) || (ind.better === 'up' && prevDiff >= 0);
     const prevCls = prevGood ? 'up' : 'down';
-    const fcstDiff = ind.forecast - ind.current;
-    const fcstArrow = fcstDiff > 0 ? '▲' : fcstDiff < 0 ? '▼' : '—';
-    const fcstGood = (ind.better === 'down' && fcstDiff <= 0) || (ind.better === 'up' && fcstDiff >= 0);
-    const fcstCls = fcstGood ? 'up' : 'down';
+    const diffPct = ind.prev !== 0 ? ((ind.current - ind.prev) / Math.abs(ind.prev) * 100) : 0;
     const fmtAbs = v => v.toFixed(1) + ind.unit;
     return `
       <div class="fed-ind-row">
@@ -945,8 +1168,7 @@ function renderOverview() {
         <div class="fed-ind-sub">
           <span class="${prevCls}">${prevArrow} 前值 ${fmtAbs(ind.prev)}</span>
           <span class="fed-ind-sep">·</span>
-          <span class="${fcstCls}">預測 ${fcstArrow} ${fmtAbs(ind.forecast)}</span>
-          <span class="fed-ind-date">${ind.forecastDate}</span>
+          <span class="${prevCls}">變動 ${prevDiff >= 0 ? '+' : ''}${prevDiff.toFixed(1)}${ind.unit}（${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(1)}%）</span>
         </div>
       </div>`;
   }).join('');
@@ -959,6 +1181,7 @@ function renderOverview() {
     LIVE_SOURCES.geoNews    && '地緣政治',
     LIVE_SOURCES.marketNews && '市場新聞',
     LIVE_SOURCES.retail     && '散戶指標',
+    LIVE_SOURCES.twPE       && '台股本益比',
   ].filter(Boolean);
   const checkSvg = `<svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>`;
   const radioSvg = `<svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12a10 10 0 0 1 4-8M22 12a10 10 0 0 0-4-8M5 12a7 7 0 0 1 3-5.7M19 12a7 7 0 0 0-3-5.7"/><circle cx="12" cy="12" r="2"/></svg>`;
@@ -1030,7 +1253,7 @@ function renderNews() {
     return `<${tag} class="news-item"${href}${style}>
       <div><span class="news-tag tag-${n.tag}">${n.label}</span></div>
       <div class="news-headline">${n.title}</div>
-      <div class="news-meta">${n.src} · ${n.time}</div>
+      <div class="news-meta">${n.src} · ${n.time ?? (n.date ? relativeDate(n.date) : '')}</div>
     </${tag}>`;
   }).join('');
   const allNewsBtn = allSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${allSlice.length})">展開全部 ${allSlice.length} 筆 ▼</button>` : '';
@@ -1042,11 +1265,17 @@ function renderNews() {
       <div class="change">${fmtChange(s.pct, s.change)}</div>
     </div>`).join('');
 
-  const earnings = EARNINGS_CALENDAR.map(e => `
+  // 過濾過期項目（含今天）— 避免顯示已公布財報
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const upcomingEarnings = EARNINGS_CALENDAR.filter(e => e.date >= todayISO);
+  const earnings = upcomingEarnings.length
+    ? upcomingEarnings.map(e => {
+        const d = new Date(e.date);
+        return `
     <div class="earnings-item">
       <div class="earnings-date">
-        <div class="e-day">${e.day}</div>
-        <div class="e-mon">${e.mon}</div>
+        <div class="e-day">${String(d.getDate()).padStart(2, '0')}</div>
+        <div class="e-mon">${ZH_MONTHS[d.getMonth()]}</div>
       </div>
       <div class="earnings-info">
         <div class="earnings-company">${e.company}</div>
@@ -1056,7 +1285,9 @@ function renderNews() {
         <div class="est-label">${e.estLabel}</div>
         <div class="est-val">${e.est}</div>
       </div>
-    </div>`).join('');
+    </div>`;
+      }).join('')
+    : `<div class="info-banner" style="margin:0">📅 暫無待公布財報；行事曆需手動更新於 app.js（EARNINGS_CALENDAR）</div>`;
 
   return `
     <div class="section">
@@ -1128,7 +1359,8 @@ function renderCycle() {
             font-size="9" fill="${p.color}" opacity="0.75">${p.assets}</text>`;
   }).join('');
 
-  const needleDeg = (-90 + ML_CLOCK_POSITION * 90) * Math.PI / 180;
+  const mlPosition = calcMLClockPosition();
+  const needleDeg = (-90 + mlPosition * 90) * Math.PI / 180;
   const nx = cx + (r * 0.75) * Math.cos(needleDeg);
   const ny = cy + (r * 0.75) * Math.sin(needleDeg);
 
@@ -1164,7 +1396,7 @@ function renderCycle() {
     </div>`).join('');
 
   // Heat gauge SVG (Pulse design: gradient stroke + colored needle)
-  const heatScore = 58; // 0-100, current moderate-warm
+  const heatScore = calcHeatScore();
   const heatColor = heatScore > 75 ? '#fb7185' : heatScore > 50 ? '#fbbf24' : '#34d399';
   const heatGrad  = heatScore > 75 ? 'linear-gradient(135deg,#fb7185,#f97316)'
                   : heatScore > 50 ? 'linear-gradient(135deg,#fbbf24,#fb923c)'
@@ -1204,10 +1436,27 @@ function renderCycle() {
       <div style="font-size:.65rem;color:var(--text-muted);margin-top:2px">${d.note}</div>
     </div>`).join('');
 
+  // 動態週期分析：依 ML clock 位置 + 實際數據組合描述
+  const cpi = FED_DATA.indicators[0].current, gdp = FED_DATA.indicators[4].current;
+  const vix = COMMODITIES.find(c => c.symbol === 'VIX')?.price ?? 18;
+  const usIdx = INDICES.find(i => i.symbol === 'SPX'),  twIdx = INDICES.find(i => i.symbol === 'TWSE');
+  const phaseLabel = getCyclePhaseLabel();
+  const usTone = usIdx?.pct >= 0 ? '上漲' : '回檔';
+  const twTone = twIdx?.pct >= 0 ? '上漲' : '回檔';
+  const heatTone = heatScore > 75 ? '已偏熱' : heatScore > 55 ? '中性偏暖' : heatScore > 35 ? '正常' : '偏冷';
   const cycleAnalysis = [
-    { icon: '🇺🇸', label: '美股週期位置', desc: '聯準會降息週期尾聲，GDP成長趨緩但就業穩健，企業獲利AI題材支撐，S&P500 本益比約22x — 偏貴但尚未泡沫化。位於擴張期後段。' },
-    { icon: '🇹🇼', label: '台股週期位置', desc: '受關稅戰影響後逐步回穩，外資持續回補半導體產業，台積電法說確認AI需求不墜。本益比約17x，相對合理偏便宜。位於復甦進入擴張期。' },
-    { icon: '📈', label: '週期預測', desc: '未來6–12個月關注：聯準會政策轉向信號、美中/美歐貿易協商進展、AI資本支出是否持續。若VIX持續低於20且成交量縮，要留意過熱修正風險。' },
+    { icon: '🇺🇸', label: '美股週期位置',
+      desc: `S&P 500 ${fmtPrice(usIdx?.price ?? 0)}（${(usIdx?.pct ?? 0).toFixed(2)}%${usTone}）；CPI ${cpi}%、GDP ${gdp}% (QoQ)，VIX ${vix.toFixed(1)}。當前位於${phaseLabel}。` },
+    { icon: '🇹🇼', label: '台股週期位置',
+      desc: `加權指數 ${fmtPrice(twIdx?.price ?? 0)}（${(twIdx?.pct ?? 0).toFixed(2)}%${twTone}）；散戶融資 ${RETAIL_DATA.margin.val}、成交量 ${RETAIL_DATA.vol.val}、外資 ${RETAIL_DATA.foreign.val}。情緒${heatTone}。` },
+    { icon: '📈', label: '週期觀察',
+      desc: heatScore > 75
+        ? '熱度偏高：留意散戶過度樂觀，FOMO 風險上升，建議檢視部位與停利點。'
+        : heatScore > 55
+          ? '熱度中性偏暖：多空均衡略偏多，關注 VIX 是否破 20、融資水位變化。'
+          : heatScore > 35
+            ? '熱度正常：風險溢酬合理，可逢低布局基本面強勢標的。'
+            : '熱度偏冷：避險情緒升溫，可留意超跌反彈機會與防禦型資產。' },
   ];
 
   const cycleRows = cycleAnalysis.map(c => `
@@ -1228,7 +1477,7 @@ function renderCycle() {
       <div class="card">
         <div class="ml-clock-wrap">
           <div class="ml-clock-svg-wrap">${clockSvg}</div>
-          <div class="ml-current-label">📍 目前位置：<strong>復甦 → 擴張過渡期</strong></div>
+          <div class="ml-current-label">📍 目前位置：<strong>${phaseLabel}</strong></div>
           <div class="ml-legend">${mlLegend}</div>
         </div>
       </div>
@@ -1362,7 +1611,13 @@ function renderAI() {
 // ── Render: Discover (Taiwan Stocks + GitHub) ─────────────────────────────
 
 function renderDiscover() {
-  const twStocks = TW_STOCKS_PE.map(s => `
+  const peLevelLabel = { low: '低估', mid: '合理', high: '偏貴' };
+  const twStocks = TW_STOCKS_PE.map(s => {
+    const subMetrics = [
+      s.dividendYield != null ? `殖利率 ${s.dividendYield.toFixed(2)}%` : null,
+      s.pbRatio       != null ? `PBR ${s.pbRatio.toFixed(2)}x`         : null,
+    ].filter(Boolean).join(' · ');
+    return `
     <div class="tw-stock-item">
       <div class="tw-rank">${s.rank}</div>
       <div class="tw-stock-info">
@@ -1371,19 +1626,26 @@ function renderDiscover() {
         <div class="tw-reason">${s.reason}</div>
       </div>
       <div class="tw-stock-right">
-        <div class="tw-pe">本益比 <strong>${s.pe}x</strong></div>
-        <div class="mt-4"><span class="pe-badge pe-${s.peLevel}">${s.peLevel === 'low' ? '低估' : s.peLevel === 'mid' ? '合理' : '偏貴'}</span></div>
+        <div class="tw-pe">本益比 <strong>${s.pe != null ? s.pe + 'x' : '—'}</strong></div>
+        ${subMetrics ? `<div style="font-size:.65rem;color:var(--text-muted);margin-top:2px;line-height:1.4">${subMetrics}</div>` : ''}
+        <div class="mt-4"><span class="pe-badge pe-${s.peLevel}">${peLevelLabel[s.peLevel] ?? s.peLevel}</span></div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+
+  const checkSvg = `<svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 13l4 4L19 7"/></svg>`;
+  const peBanner = LIVE_SOURCES.twPE
+    ? `<div class="banner live">${checkSvg}<span><b>即時資料</b> · TWSE 本益比、殖利率、股價淨值比（依產業均值分級）</span></div>`
+    : `<div class="info-banner">📊 以 AI / 科技供應鏈為主軸，本益比為模擬值；無需 API Key，資料載入後自動更新</div>`;
 
   return `
     <div class="section">
       <div class="sec-head">
         <div class="sec-title">台股本益比 &amp; 成長潛力</div>
-        <div class="sec-meta">AI / 科技供應鏈</div>
+        <div class="sec-meta">${LIVE_SOURCES.twPE ? 'TWSE · 每日更新' : 'AI / 科技供應鏈'}</div>
       </div>
       <div class="card">
-        <div class="info-banner">📊 以 AI / 科技供應鏈為主軸，本益比資料為模擬值，請以實際財報為準</div>
+        ${peBanner}
         ${twStocks}
       </div>
     </div>

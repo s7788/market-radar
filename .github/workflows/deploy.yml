@@ -19,20 +19,21 @@ jobs:
       - name: Build config.js from secrets
         env:
           TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           FUGLE_API_KEY: ${{ secrets.FUGLE_API_KEY }}
           GH_API_TOKEN: ${{ secrets.GH_API_TOKEN }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           CORS_PROXY: ${{ secrets.CORS_PROXY }}
         run: |
           BUILD_VERSION=$(TZ='Asia/Taipei' date '+%Y%m%d%H%M')
-          CORS_PROXY_VAL="${CORS_PROXY:-https://api.allorigins.win/raw?url=}"
           cat > config.js << EOF
           const CONFIG = {
             TWELVE_DATA_API_KEY: '${TWELVE_DATA_API_KEY}',
+            POLYGON_API_KEY: '${POLYGON_API_KEY}',
             FUGLE_API_KEY: '${FUGLE_API_KEY}',
             GITHUB_TOKEN: '${GH_API_TOKEN}',
             FRED_API_KEY: '${FRED_API_KEY}',
-            CORS_PROXY: '${CORS_PROXY_VAL}',
+            CORS_PROXY: '${CORS_PROXY}',
             BUILD_VERSION: '${BUILD_VERSION}',
             WATCHLIST_US: ['AAPL', 'NVDA', 'MSFT', 'META', 'GOOGL', 'AMZN', 'TSLA', 'NBIS', 'ARM', 'AMD', 'ALAB', 'CRSP', 'MU', 'VRT', 'AVGO', 'CRWV', 'LEU', 'ONDS', 'PLTR', 'SMCI', 'SNDK', 'TSM', 'UUUU', 'VIX', 'VRT'],
             WATCHLIST_TW: ['2330', '2317', '2454', '2382', '2308', '3017'],

@@ -17,10 +17,15 @@ const CONFIG = {
   FUGLE_API_KEY: 'your_fugle_api_key_here',
 
   // ── 美股 / 指數 / FX (Twelve Data) ─────────────────────────────────────
-  // 同一個 key 取股票 + 指數 (SPX/IXIC/DJI/VIX) + FX (USD/TWD/XAU/Brent)
-  // 免費版：800 credits/day, 8 credits/min, batch 一次拿多檔
+  // 一次 batch 抓：SPX / NDX / DJI / VIX / XAU/USD / USD/TWD / XBR/USD(Brent)
+  // 免費版：800 credits/day, 8 credits/min，7 個 symbol 一次扣 7 credits
   // 申請：https://twelvedata.com/pricing → Free tier
   TWELVE_DATA_API_KEY: 'your_twelvedata_api_key_here',
+
+  // ── 自選股行情 + 市場新聞 (Polygon.io) ────────────────────────────────
+  // 自選股前收盤價、個股新聞；Twelve Data 不足時作為指數/商品 fallback
+  // 免費版：無限 API calls（EOD data）；申請：https://polygon.io → Free
+  POLYGON_API_KEY: 'your_polygon_api_key_here',
 
   // ── 自選股清單 ────────────────────────────────────────────────────────
   // 修改這裡即可自訂追蹤的股票，無需動 app.js
