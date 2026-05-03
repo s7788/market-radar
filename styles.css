@@ -987,3 +987,16 @@ a.frontier-item:hover .frontier-headline { color: var(--primary-2); }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--glass-line-2); border-radius: 2px; }
+
+/* ── Reduced motion ──────────────────────────────────────────────────── */
+/* Honor the OS-level motion preference (iOS Settings → Accessibility →
+   Motion → Reduce Motion; Windows → Settings → Accessibility → Visual effects).
+   Disable pulse/spin/fade animations and smooth scroll when set. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto !important; }
+}

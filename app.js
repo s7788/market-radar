@@ -317,21 +317,33 @@ async function fetchFugleQuote(symbol) {
 // so these calls are routed through a proxy.
 // Proxies are tried in order; the first one that returns a non-403 response wins.
 // Override via CONFIG.CORS_PROXY to use a single custom proxy exclusively.
-const _CORS_PROXIES = [
+// _proxyOrder is mutated as proxies succeed/fail so a downed proxy doesn't keep
+// costing every subsequent caller a full timeout.
+const _proxyOrder = [
   'https://corsproxy.io/?url=',
   'https://api.allorigins.win/raw?url=',
   'https://thingproxy.freeboard.io/fetch/',
 ];
 
 async function proxyFetch(targetUrl, options = {}) {
-  const proxies = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY)
-    ? [CONFIG.CORS_PROXY]
-    : _CORS_PROXIES;
+  const userOverride = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY) ? CONFIG.CORS_PROXY : null;
+  const proxies = userOverride ? [userOverride] : _proxyOrder.slice();
   let lastErr;
   for (const proxy of proxies) {
     try {
       const res = await fetch(proxy + encodeURIComponent(targetUrl), options);
-      if (res.status === 429 || res.ok) return res; // 429 rate-limit: let caller handle
+      if (res.status === 429 || res.ok) {
+        // Promote the working proxy to the head of the rotation so the next
+        // caller doesn't repeat earlier failures. Skipped when user overrode.
+        if (!userOverride && _proxyOrder[0] !== proxy) {
+          const idx = _proxyOrder.indexOf(proxy);
+          if (idx > 0) {
+            _proxyOrder.splice(idx, 1);
+            _proxyOrder.unshift(proxy);
+          }
+        }
+        return res;
+      }
       lastErr = new Error(res.status);
     } catch (e) { lastErr = e; }
   }
@@ -1163,7 +1175,7 @@ function renderOverview() {
       <div class="news-meta">${esc(g.src)} · ${displayDate}</div>
     </${tag}>`;
   }).join('');
-  const geoBtn = geoSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this)">展開全部 ${geoSlice.length} 筆 ▼</button>` : '';
+  const geoBtn = geoSlice.length > 3 ? `<button class="expand-btn" aria-expanded="false" onclick="toggleExpand(this)">展開全部 ${geoSlice.length} 筆 ▼</button>` : '';
 
   const newsSlice = NEWS.slice(0, 5);
   const topNews = newsSlice.map(n => {
@@ -1177,7 +1189,7 @@ function renderOverview() {
       <div class="news-meta">${esc(n.src)} · ${esc(meta)}</div>
     </${tag}>`;
   }).join('');
-  const newsBtn = newsSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this)">展開全部 ${newsSlice.length} 筆 ▼</button>` : '';
+  const newsBtn = newsSlice.length > 3 ? `<button class="expand-btn" aria-expanded="false" onclick="toggleExpand(this)">展開全部 ${newsSlice.length} 筆 ▼</button>` : '';
 
   const fedMtg = FED_DATA.nextMeeting;
   const cutProbColor = fedMtg.cutProb >= 50
@@ -1307,7 +1319,7 @@ function renderNews() {
       <div class="news-meta">${esc(n.src)} · ${esc(meta)}</div>
     </${tag}>`;
   }).join('');
-  const allNewsBtn = allSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this)">展開全部 ${allSlice.length} 筆 ▼</button>` : '';
+  const allNewsBtn = allSlice.length > 3 ? `<button class="expand-btn" aria-expanded="false" onclick="toggleExpand(this)">展開全部 ${allSlice.length} 筆 ▼</button>` : '';
 
   const watchItems = WATCHLIST.map(s => `
     <div class="price-cell">
@@ -1635,7 +1647,7 @@ function renderAI() {
       </div>
     </${tag}>`;
   }).join('');
-  const frontierBtn = frontierSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this)">展開全部 ${frontierSlice.length} 筆 ▼</button>` : '';
+  const frontierBtn = frontierSlice.length > 3 ? `<button class="expand-btn" aria-expanded="false" onclick="toggleExpand(this)">展開全部 ${frontierSlice.length} 筆 ▼</button>` : '';
 
   return `
     <div class="section">
@@ -1801,14 +1813,18 @@ function switchTab(id) {
   const sameTab = id === activeTab;
   activeTab = id;
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    const isActive = b.dataset.tab === id;
+    b.classList.toggle('active', isActive);
+    b.setAttribute('aria-selected', isActive);
+    b.setAttribute('tabindex', isActive ? '0' : '-1');
+  });
   const panel = document.getElementById(`tab-${id}`);
   const tab = TABS.find(t => t.id === id);
   if (panel && tab) {
     panel.innerHTML = tab.render();
     panel.classList.add('active');
   }
-  document.querySelector(`[data-tab="${id}"]`)?.classList.add('active');
   // Only scroll on real tab switches — refresh() also calls this to re-render the
   // active tab and the scroll-jump is jarring (and loses user's scroll position).
   if (!sameTab) window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1845,6 +1861,7 @@ function toggleExpand(btn) {
   if (!wrap) return;
   // Visibility is driven by CSS (.expandable.expanded > :nth-child(n+4)).
   const expanded = wrap.classList.toggle('expanded');
+  btn.setAttribute('aria-expanded', expanded);
   btn.textContent = expanded ? '收合 ▲' : `展開全部 ${wrap.children.length} 筆 ▼`;
 }
 
@@ -1852,16 +1869,27 @@ function toggleExpand(btn) {
 
 function buildNav() {
   const nav = document.getElementById('bottom-nav');
-  nav.innerHTML = TABS.map(t => `
-    <button class="nav-btn${t.id === activeTab ? ' active' : ''}" data-tab="${t.id}" onclick="switchTab('${t.id}')" aria-label="${t.label}">
+  nav.setAttribute('role', 'tablist');
+  nav.setAttribute('aria-label', '主頁籤');
+  nav.innerHTML = TABS.map(t => {
+    const active = t.id === activeTab;
+    return `
+    <button class="nav-btn${active ? ' active' : ''}" data-tab="${t.id}" id="nav-${t.id}"
+            role="tab" aria-selected="${active}" aria-controls="tab-${t.id}"
+            tabindex="${active ? '0' : '-1'}"
+            onclick="switchTab('${t.id}')" aria-label="${t.label}">
       <span class="nav-icon">${NAV_ICONS[t.id] || ''}</span>
       <span>${t.label}</span>
-    </button>`).join('');
+    </button>`;
+  }).join('');
 }
 
 function buildContent() {
   const content = document.getElementById('tab-content');
-  content.innerHTML = TABS.map(t => `<div class="tab-panel${t.id === activeTab ? ' active' : ''}" id="tab-${t.id}"></div>`).join('');
+  content.innerHTML = TABS.map(t =>
+    `<div class="tab-panel${t.id === activeTab ? ' active' : ''}" id="tab-${t.id}"
+          role="tabpanel" aria-labelledby="nav-${t.id}" tabindex="0"></div>`
+  ).join('');
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
