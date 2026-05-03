@@ -16,17 +16,20 @@ const COMMODITIES = [
 
 // FRED 提供 current/prev 真實值，但不提供 consensus forecast；forecast 欄位移除。
 // nextMeeting.date 由 nextFOMC() 動態計算，cutProb/rateExpected 為估計（CME FedWatch 需訂閱）
+// 每個 indicator 自帶 FRED series id / params / scale，避免平行陣列 index 對齊。
+// 新增指標只要在這裡加一筆，fetchFredData 與 calcMLClockPosition 自動配合。
 const FED_DATA = {
   nextMeeting: { rateNow: '3.50–3.75%', rateExpected: '3.50–3.75%', cutProb: 11 },
   indicators: [
-    { label: 'CPI 通膨率',  unit: '%',  current:  3.3,  prev:  2.4,  better: 'down' },
-    { label: '核心 CPI',    unit: '%',  current:  2.6,  prev:  2.5,  better: 'down' },
-    { label: 'PCE 通膨',    unit: '%',  current:  2.5,  prev:  2.3,  better: 'down' },
-    { label: '失業率',      unit: '%',  current:  4.3,  prev:  4.4,  better: 'down' },
-    { label: 'GDP (QoQ)',   unit: '%',  current:  1.2,  prev:  2.3,  better: 'up'   },
-    { label: '非農就業',    unit: '萬', current: 17.8,  prev: 15.1,  better: 'up'   },
+    { id: 'cpi',     label: 'CPI 通膨率', unit: '%',  current:  3.3, prev:  2.4, better: 'down', series: 'CPIAUCSL',         params: '&units=pc1', scale: 1   },
+    { id: 'coreCpi', label: '核心 CPI',   unit: '%',  current:  2.6, prev:  2.5, better: 'down', series: 'CPILFESL',         params: '&units=pc1', scale: 1   },
+    { id: 'pce',     label: 'PCE 通膨',   unit: '%',  current:  2.5, prev:  2.3, better: 'down', series: 'PCEPILFE',         params: '&units=pc1', scale: 1   },
+    { id: 'unemp',   label: '失業率',     unit: '%',  current:  4.3, prev:  4.4, better: 'down', series: 'UNRATE',           params: '',           scale: 1   },
+    { id: 'gdp',     label: 'GDP (QoQ)',  unit: '%',  current:  1.2, prev:  2.3, better: 'up',   series: 'A191RL1Q225SBEA',  params: '',           scale: 1   },
+    { id: 'nfp',     label: '非農就業',   unit: '萬', current: 17.8, prev: 15.1, better: 'up',   series: 'PAYEMS',           params: '&units=chg', scale: 0.1 },
   ],
 };
+const _fedById = id => FED_DATA.indicators.find(i => i.id === id);
 
 // FOMC 2026 會議行程（自動計算下次會議日期）
 const FOMC_2026 = [
@@ -40,7 +43,10 @@ const FOMC_2026 = [
   { end: '2026-12-10', display: '12月9–10日' },
 ];
 function nextFOMC() {
-  const today = new Date().toISOString().slice(0, 10);
+  // FOMC.end dates are NY-time. Use NY today (not UTC) so we don't roll over to
+  // the next meeting prematurely during the UTC-vs-NY date gap (worst case 5h).
+  // 'en-CA' yields YYYY-MM-DD for direct string comparison with .end.
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   return FOMC_2026.find(m => m.end >= today) ?? FOMC_2026[FOMC_2026.length - 1];
 }
 
@@ -175,9 +181,9 @@ const PE_THRESHOLDS = {
 // 位置 0-4：0=12 點=復甦起點、1=3 點=擴張起點、2=6 點=過熱起點、3=9 點=衰退起點
 // 邏輯：CPI ↓ + GDP ↑ = 復甦；CPI ↑ + GDP ↑ = 擴張；CPI ↑ + GDP ↓ = 過熱；CPI ↓ + GDP ↓ = 衰退
 function calcMLClockPosition() {
-  const cpi = FED_DATA.indicators[0]; // CPI 通膨率
-  const gdp = FED_DATA.indicators[4]; // GDP (QoQ)
-  if (cpi.current == null || cpi.prev == null || gdp.current == null || gdp.prev == null) return 0.75;
+  const cpi = _fedById('cpi');
+  const gdp = _fedById('gdp');
+  if (!cpi || !gdp || cpi.current == null || cpi.prev == null || gdp.current == null || gdp.prev == null) return 0.75;
 
   const cpiUp = cpi.current > cpi.prev;
   const gdpUp = gdp.current > gdp.prev;
@@ -249,6 +255,15 @@ const US_NAMES = {
   QCOM:'Qualcomm', INTC:'Intel', ARM:'ARM Holdings',
 };
 
+// Single in-flight abort scope for the whole live-data refresh round. When the
+// user hits refresh again before the previous round finished, we abort all
+// pending fetches instead of letting them race the new round to overwrite data.
+let _liveAbort = null;
+function _withAbort(timeoutMs) {
+  const t = AbortSignal.timeout(timeoutMs);
+  return _liveAbort ? AbortSignal.any([_liveAbort.signal, t]) : t;
+}
+
 // Polygon free tier is 5 req/min — cache aggressively per-symbol so a refresh
 // burst of ~30 symbols doesn't blow the budget. Free-tier prev-day data is
 // 15+ min delayed anyway, so a 5-min cache costs us nothing.
@@ -260,31 +275,39 @@ function readPolygonCache(symbol) {
     return JSON.parse(raw);
   } catch (_) { return null; }
 }
+// In-flight de-dup: if 多處同時呼叫同一個 symbol（e.g. watchlist + indices fallback），
+// 只發一個實際請求。對 5 req/min 限制特別重要。
+const _polygonInflight = new Map();
 async function fetchPolygonPrev(symbol) {
   const cached = readPolygonCache(symbol);
   if (cached && Date.now() - cached.ts < POLYGON_CACHE_TTL) return cached.data;
-  try {
-    const res = await fetch(
-      `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${CONFIG.POLYGON_API_KEY}`,
-      { signal: AbortSignal.timeout(8000) }
-    );
-    if (res.status === 429) return cached?.data ?? null; // rate-limited: serve cached
-    if (!res.ok) throw new Error(res.status);
-    const j = await res.json();
-    const data = j.results?.[0] ?? null;
-    if (data) {
-      try { localStorage.setItem(`pgn_${symbol}`, JSON.stringify({ data, ts: Date.now() })); } catch (_) {}
+  if (_polygonInflight.has(symbol)) return _polygonInflight.get(symbol);
+  const p = (async () => {
+    try {
+      const res = await fetch(
+        `https://api.polygon.io/v2/aggs/ticker/${symbol}/prev?adjusted=true&apiKey=${CONFIG.POLYGON_API_KEY}`,
+        { signal: _withAbort(8000) }
+      );
+      if (res.status === 429) return cached?.data ?? null; // rate-limited: serve cached
+      if (!res.ok) throw new Error(res.status);
+      const j = await res.json();
+      const data = Array.isArray(j.results) && j.results.length ? j.results[0] : null;
+      if (data) {
+        try { localStorage.setItem(`pgn_${symbol}`, JSON.stringify({ data, ts: Date.now() })); } catch (_) {}
+      }
+      return data;
+    } catch (_) {
+      return cached?.data ?? null;
     }
-    return data;
-  } catch (_) {
-    return cached?.data ?? null;
-  }
+  })();
+  _polygonInflight.set(symbol, p);
+  try { return await p; } finally { _polygonInflight.delete(symbol); }
 }
 
 async function fetchFugleQuote(symbol) {
   const res = await fetch(
     `https://api.fugle.tw/marketdata/v1.0/stock/intraday/quote/${symbol}`,
-    { headers: { 'X-API-KEY': CONFIG.FUGLE_API_KEY }, signal: AbortSignal.timeout(8000) }
+    { headers: { 'X-API-KEY': CONFIG.FUGLE_API_KEY }, signal: _withAbort(8000) }
   );
   if (!res.ok) throw new Error(res.status);
   return res.json();
@@ -317,7 +340,9 @@ async function proxyFetch(targetUrl, options = {}) {
 
 async function fetchFredSingle(seriesId, extraParams = '') {
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
-  const res = await proxyFetch(target, { signal: AbortSignal.timeout(12000) });
+  // FRED supports CORS natively from any browser origin — call directly,
+  // bypassing the proxy (Cloudflare datacenter IPs are often blocked by FRED).
+  const res = await fetch(target, { signal: _withAbort(12000) });
   if (!res.ok) throw new Error(res.status);
   const j = await res.json();
   return (j.observations || []).filter(o => o.value !== '.');
@@ -326,15 +351,11 @@ async function fetchFredSingle(seriesId, extraParams = '') {
 async function fetchFredData() {
   if (!cfg('FRED_API_KEY')) return;
   try {
-    const [rateL, rateU, cpi, coreCpi, pce, unemp, gdp, nfp] = await Promise.all([
+    // 拉 Fed funds target range（不在 indicators 內，分開處理）+ 各 indicator
+    const [rateL, rateU, ...obs] = await Promise.all([
       fetchFredSingle('DFEDTARL'),
       fetchFredSingle('DFEDTARU'),
-      fetchFredSingle('CPIAUCSL', '&units=pc1'),
-      fetchFredSingle('CPILFESL', '&units=pc1'),
-      fetchFredSingle('PCEPILFE', '&units=pc1'),
-      fetchFredSingle('UNRATE'),
-      fetchFredSingle('A191RL1Q225SBEA'),
-      fetchFredSingle('PAYEMS', '&units=chg'),
+      ...FED_DATA.indicators.map(ind => fetchFredSingle(ind.series, ind.params)),
     ]);
 
     if (rateL[0] && rateU[0]) {
@@ -342,37 +363,34 @@ async function fetchFredData() {
       FED_DATA.nextMeeting.rateNow = `${lo.toFixed(2)}–${hi.toFixed(2)}%`;
     }
 
-    const series = [cpi, coreCpi, pce, unemp, gdp, nfp];
-    const scales  = [  1,      1,   1,    1,   1, 0.1];
-    series.forEach((obs, i) => {
-      if (obs[0]) FED_DATA.indicators[i].current = +(parseFloat(obs[0].value) * scales[i]).toFixed(1);
-      if (obs[1]) FED_DATA.indicators[i].prev    = +(parseFloat(obs[1].value) * scales[i]).toFixed(1);
+    FED_DATA.indicators.forEach((ind, i) => {
+      const o = obs[i];
+      if (o[0]) ind.current = +(parseFloat(o[0].value) * ind.scale).toFixed(1);
+      if (o[1]) ind.prev    = +(parseFloat(o[1].value) * ind.scale).toFixed(1);
     });
 
     LIVE_SOURCES.fed = true;
   } catch (_) {}
 }
 
-function applyOHLC(arr, idx, d) {
-  if (!d?.c) return;
-  const pct = d.o > 0 ? ((d.c - d.o) / d.o) * 100 : 0;
-  arr[idx].price  = d.c;
-  arr[idx].change = +(d.c - d.o).toFixed(2);
+// Apply a quote (close/open + optional precomputed pct) to a slot. Returns true
+// if data was applied. Used by both Twelve Data (close/open/percent_change keys)
+// and Polygon prev-day (c/o keys).
+function applyQuote(arr, idx, close, open, pctRaw) {
+  if (!close || !arr[idx]) return false;
+  const pct = pctRaw != null ? parseFloat(pctRaw) : (open > 0 ? ((close - open) / open) * 100 : 0);
+  arr[idx].price  = close;
+  arr[idx].change = +(close - open).toFixed(2);
   arr[idx].pct    = +pct.toFixed(2);
+  return true;
 }
 
 async function fetchLiveMarketData() {
   const hits = [];
-
-  // Helper: apply a Twelve Data quote object to an array slot
-  const applyTD = (d, arr, idx) => {
-    if (!d || d.code || !d.close) return false;
-    const close = +d.close, open = +(d.open ?? d.close);
-    arr[idx].price  = close;
-    arr[idx].change = +(close - open).toFixed(2);
-    arr[idx].pct    = +parseFloat(d.percent_change ?? 0).toFixed(2);
-    return true;
-  };
+  const applyTD = (d, arr, idx) =>
+    (d && !d.code) ? applyQuote(arr, idx, +d.close, +(d.open ?? d.close), d.percent_change) : false;
+  const applyPGN = (arr, idx, d) =>
+    d ? applyQuote(arr, idx, d.c, d.o, null) : false;
 
   await Promise.allSettled([
 
@@ -385,7 +403,7 @@ async function fetchLiveMarketData() {
         const syms = 'SPX,NDX,DJI,VIX,XAU/USD,USD/TWD,XBR/USD';
         const res = await fetch(
           `https://api.twelvedata.com/quote?symbol=${syms}&dp=2&apikey=${CONFIG.TWELVE_DATA_API_KEY}`,
-          { signal: AbortSignal.timeout(10000) }
+          { signal: _withAbort(10000) }
         );
         if (!res.ok) return;
         const data = await res.json();
@@ -403,12 +421,12 @@ async function fetchLiveMarketData() {
     cfg('POLYGON_API_KEY') && (async () => {
       if (hits.length >= 4) return; // Twelve Data already succeeded
       await Promise.allSettled([
-        fetchPolygonPrev('I:SPX'   ).then(d => { applyOHLC(INDICES,     0, d); if (d) hits.push(1); }).catch(() => {}),
-        fetchPolygonPrev('I:NDX'   ).then(d => { applyOHLC(INDICES,     1, d); if (d) hits.push(1); }).catch(() => {}),
-        fetchPolygonPrev('I:DJI'   ).then(d => { applyOHLC(INDICES,     2, d); if (d) hits.push(1); }).catch(() => {}),
-        fetchPolygonPrev('C:XAUUSD').then(d => { applyOHLC(COMMODITIES, 1, d); if (d) hits.push(1); }).catch(() => {}),
-        fetchPolygonPrev('I:VIX'   ).then(d => { applyOHLC(COMMODITIES, 2, d); if (d) hits.push(1); }).catch(() => {}),
-        fetchPolygonPrev('C:USDTWD').then(d => { applyOHLC(COMMODITIES, 3, d); if (d) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('I:SPX'   ).then(d => { if (applyPGN(INDICES,     0, d)) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('I:NDX'   ).then(d => { if (applyPGN(INDICES,     1, d)) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('I:DJI'   ).then(d => { if (applyPGN(INDICES,     2, d)) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('C:XAUUSD').then(d => { if (applyPGN(COMMODITIES, 1, d)) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('I:VIX'   ).then(d => { if (applyPGN(COMMODITIES, 2, d)) hits.push(1); }).catch(() => {}),
+        fetchPolygonPrev('C:USDTWD').then(d => { if (applyPGN(COMMODITIES, 3, d)) hits.push(1); }).catch(() => {}),
       ]);
     })(),
 
@@ -510,21 +528,21 @@ async function fetchAIFrontierNews() {
 
 // ── RSS Fetcher (free, no API key; uses allorigins.win proxy for CORS) ────
 async function fetchRSSItems(rssUrl, sourceName) {
-  const res = await proxyFetch(rssUrl, { signal: AbortSignal.timeout(10000) });
+  const res = await proxyFetch(rssUrl, { signal: _withAbort(10000) });
   if (!res.ok) throw new Error(res.status);
   const xml = await res.text();
   const doc = new DOMParser().parseFromString(xml, 'text/xml');
   return [...doc.querySelectorAll('item')].map(item => {
     // <link> in RSS is sometimes a text node sibling, not a child text node
     const linkEl = item.querySelector('link');
-    const link = linkEl?.textContent?.trim() || linkEl?.nextSibling?.textContent?.trim() || '';
+    const rawLink = linkEl?.textContent?.trim() || linkEl?.nextSibling?.textContent?.trim() || '';
     return {
       title: item.querySelector('title')?.textContent?.trim() || '',
-      link,
-      pubDate: item.querySelector('pubDate')?.textContent?.trim() || new Date().toISOString(),
+      link: safeURL(rawLink),
+      pubDate: item.querySelector('pubDate')?.textContent?.trim() || '',
       source: sourceName,
     };
-  }).filter(i => i.title && i.link);
+  }).filter(i => i.title && i.link && i.pubDate);
 }
 
 const GEO_RSS_FEEDS = [
@@ -564,14 +582,15 @@ async function fetchMarketNewsFromPolygon() {
   if (!cfg('POLYGON_API_KEY')) return [];
   const from = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
   const url = `https://api.polygon.io/v2/reference/news?limit=20&published_utc.gte=${from}&order=desc&sort=published_utc&apiKey=${CONFIG.POLYGON_API_KEY}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  const res = await fetch(url, { signal: _withAbort(10000) });
   if (!res.ok) throw new Error(res.status);
   const j = await res.json();
   const items = [];
   for (const a of (j.results || [])) {
-    if (!a.title || !a.article_url) continue;
+    const link = safeURL(a.article_url);
+    if (!a.title || !link) continue;
     const cat = categorizeMarketNews(a.title, a.publisher?.name || '');
-    items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.publisher?.name || '', time: relativeDate(a.published_utc), url: a.article_url });
+    items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.publisher?.name || '', time: relativeDate(a.published_utc), url: link });
     if (items.length >= 7) break;
   }
   return items;
@@ -747,7 +766,7 @@ async function fetchTWStocksPE() {
   const fmtDate = d => d.toISOString().slice(0, 10).replace(/-/g, '');
   const fetchDay = async date => {
     const url = `https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU?response=json&date=${date}&selectType=ALL`;
-    const j = await proxyFetch(url, { signal: AbortSignal.timeout(12000) })
+    const j = await proxyFetch(url, { signal: _withAbort(12000) })
       .then(r => r.ok ? r.json() : null).catch(() => null);
     return _parseBWIBBU(j);
   };
@@ -785,50 +804,66 @@ function applyTWPEData(peMap) {
   if (updated) LIVE_SOURCES.twPE = true;
 }
 
+// Replace all rows of a single market (US or TW) without disturbing the other.
+// All callers run their .then synchronously after the await — JS single-threaded
+// guarantees no interleaving — so this is safe even when US/TW resolve in any order.
+function _setMarketWatchlist(market, live) {
+  if (!live.length) return;
+  const others = WATCHLIST.filter(w => w.market !== market);
+  WATCHLIST.length = 0;
+  if (market === 'US') WATCHLIST.push(...live, ...others);
+  else WATCHLIST.push(...others, ...live);
+  LIVE_SOURCES.watchlist = true;
+}
+
+async function _fetchUSWatchlistTwelveData(syms) {
+  const res = await fetch(
+    `https://api.twelvedata.com/quote?symbol=${syms.join(',')}&dp=2&apikey=${CONFIG.TWELVE_DATA_API_KEY}`,
+    { signal: _withAbort(10000) }
+  );
+  if (!res.ok) return [];
+  const data = await res.json();
+  return syms.map(sym => {
+    const d = syms.length === 1 ? data : data[sym];
+    if (!d || d.code || !d.close) return null;
+    const close = +d.close, open = +(d.open ?? d.close);
+    return { name: d.name || US_NAMES[sym] || sym, symbol: sym, price: close, change: +(close - open).toFixed(2), pct: +parseFloat(d.percent_change ?? 0).toFixed(2), market: 'US' };
+  }).filter(Boolean);
+}
+
+async function _fetchUSWatchlistPolygon(syms) {
+  const results = await Promise.allSettled(syms.map(s => fetchPolygonPrev(s)));
+  return results.map((r, i) => {
+    if (r.status !== 'fulfilled' || !r.value) return null;
+    const d = r.value;
+    const pct = d.o > 0 ? ((d.c - d.o) / d.o) * 100 : 0;
+    return { name: US_NAMES[syms[i]] || syms[i], symbol: syms[i], price: d.c, change: +(d.c - d.o).toFixed(2), pct: +pct.toFixed(2), market: 'US' };
+  }).filter(Boolean);
+}
+
 async function fetchAndUpdateLiveData() {
+  // Cancel any still-running previous round before starting a new one.
+  // Prevents zombie fetches from overwriting fresher data on rapid refreshes.
+  _liveAbort?.abort();
+  _liveAbort = new AbortController();
   const tasks = [];
 
-  if (cfg('POLYGON_API_KEY')) {
-    const syms = CONFIG.WATCHLIST_US ?? ['AAPL', 'NVDA', 'MSFT', 'META'];
-    tasks.push(
-      Promise.allSettled(syms.map(s => fetchPolygonPrev(s))).then(results => {
-        const live = results.map((r, i) => {
-          if (r.status !== 'fulfilled' || !r.value) return null;
-          const d = r.value;
-          const pct = d.o > 0 ? ((d.c - d.o) / d.o) * 100 : 0;
-          return { name: US_NAMES[syms[i]] || syms[i], symbol: syms[i], price: d.c, change: +(d.c - d.o).toFixed(2), pct: +pct.toFixed(2), market: 'US' };
-        }).filter(Boolean);
-        if (live.length) {
-          const twOnly = WATCHLIST.filter(w => w.market === 'TW');
-          WATCHLIST.length = 0;
-          WATCHLIST.push(...live, ...twOnly);
-          LIVE_SOURCES.watchlist = true;
-        }
-      })
-    );
-  } else if (cfg('TWELVE_DATA_API_KEY')) {
+  // US watchlist: prefer Twelve Data (1 batch call) over Polygon (N calls).
+  // Polygon free tier is 5 req/min — calling it for 6 watchlist symbols + indices
+  // fallback (6 more) easily 429s. Twelve Data batch is 1 call regardless of size.
+  const hasTD = cfg('TWELVE_DATA_API_KEY');
+  const hasPGN = cfg('POLYGON_API_KEY');
+  if (hasTD || hasPGN) {
     const syms = CONFIG.WATCHLIST_US ?? ['AAPL', 'NVDA', 'MSFT', 'META'];
     tasks.push((async () => {
-      try {
-        const res = await fetch(
-          `https://api.twelvedata.com/quote?symbol=${syms.join(',')}&dp=2&apikey=${CONFIG.TWELVE_DATA_API_KEY}`,
-          { signal: AbortSignal.timeout(10000) }
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        const live = syms.map(sym => {
-          const d = syms.length === 1 ? data : data[sym];
-          if (!d || d.code || !d.close) return null;
-          const close = +d.close, open = +(d.open ?? d.close);
-          return { name: d.name || US_NAMES[sym] || sym, symbol: sym, price: close, change: +(close - open).toFixed(2), pct: +parseFloat(d.percent_change ?? 0).toFixed(2), market: 'US' };
-        }).filter(Boolean);
-        if (live.length) {
-          const twOnly = WATCHLIST.filter(w => w.market === 'TW');
-          WATCHLIST.length = 0;
-          WATCHLIST.push(...live, ...twOnly);
-          LIVE_SOURCES.watchlist = true;
-        }
-      } catch (_) {}
+      let live = [];
+      if (hasTD) {
+        try { live = await _fetchUSWatchlistTwelveData(syms); } catch (_) {}
+      }
+      if (!live.length && hasPGN) {
+        try { live = await _fetchUSWatchlistPolygon(syms); } catch (_) {}
+      }
+      _setMarketWatchlist('US', live);
     })());
   }
 
@@ -841,12 +876,7 @@ async function fetchAndUpdateLiveData() {
           const d = r.value;
           return { name: d.name || syms[i], symbol: syms[i], price: d.closePrice ?? d.lastPrice ?? 0, change: d.change ?? 0, pct: d.changePercent ?? 0, market: 'TW' };
         }).filter(Boolean);
-        if (live.length) {
-          const usOnly = WATCHLIST.filter(w => w.market === 'US');
-          WATCHLIST.length = 0;
-          WATCHLIST.push(...usOnly, ...live);
-          LIVE_SOURCES.watchlist = true;
-        }
+        _setMarketWatchlist('TW', live);
       })
     );
   }
@@ -879,7 +909,7 @@ async function fetchTWSERetailData() {
 
     // ── 融資 / 融券 (MI_MARGN) — sum ALL stocks for market-wide total ─────
     (async () => {
-      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN', { signal: AbortSignal.timeout(15000) })
+      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN', { signal: _withAbort(15000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
       if (!Array.isArray(j) || !j.length) return;
 
@@ -914,7 +944,7 @@ async function fetchTWSERetailData() {
     // ── 成交量 vs 月均量 (FMTQIK) ────────────────────────────────────────
     // FMTQIK returns current-month daily rows; 成交金額 is in 元
     (async () => {
-      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK', { signal: AbortSignal.timeout(12000) })
+      const j = await proxyFetch('https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK', { signal: _withAbort(12000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
       if (!Array.isArray(j) || !j.length) return;
 
@@ -934,7 +964,7 @@ async function fetchTWSERetailData() {
     // Response: { stat:'OK', data:[['單位名稱','買進金額','賣出金額','買賣差額'], ...] }
     // Amounts are in 元; divide by 1e8 to get 億元
     (async () => {
-      const j = await proxyFetch('https://www.twse.com.tw/rwd/zh/fund/BFI82U?response=json', { signal: AbortSignal.timeout(12000) })
+      const j = await proxyFetch('https://www.twse.com.tw/rwd/zh/fund/BFI82U?response=json', { signal: _withAbort(12000) })
         .then(r => r.ok ? r.json() : null).catch(() => null);
       if (!j || j.stat !== 'OK' || !Array.isArray(j.data)) return;
 
@@ -954,10 +984,29 @@ async function fetchTWSERetailData() {
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
+// HTML escape — used on every untrusted string before insertion into innerHTML.
+// RSS feeds, GitHub repo descriptions, Polygon news titles can all contain HTML.
+const _ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => _ESC[c]);
+}
+
+// URL whitelist — only allow http(s) URLs so a malicious feed can't inject
+// `javascript:` or `data:` hrefs. Returns '' for invalid input (caller should
+// fall back to non-anchor markup).
+function safeURL(u) {
+  if (!u) return '';
+  try {
+    const url = new URL(u, 'https://x/');
+    return /^https?:$/.test(url.protocol) ? url.toString() : '';
+  } catch (_) { return ''; }
+}
+
 function fmtChange(pct, v) {
+  if (pct == null || isNaN(pct)) return '<span class="muted">—</span>';
   const sign = v >= 0 ? '+' : '';
   const cls = v >= 0 ? 'up' : 'down';
-  const absStr = v != null ? `<span class="chg-abs ${cls}" style="opacity:.65;font-size:.7rem;margin-left:4px">${sign}${v.toFixed(2)}</span>` : '';
+  const absStr = (v != null && !isNaN(v)) ? `<span class="chg-abs ${cls}" style="opacity:.65;font-size:.7rem;margin-left:4px">${sign}${v.toFixed(2)}</span>` : '';
   return `<span class="${cls}">${sign}${pct.toFixed(2)}%</span>${absStr}`;
 }
 
@@ -1103,31 +1152,32 @@ function renderOverview() {
   }).join('');
 
   const geoSlice = GEO_NEWS.slice(0, 5);
-  const geoRows = geoSlice.map((g, i) => {
-    const tag = g.url ? 'a' : 'div';
-    const href = g.url ? ` href="${g.url}" target="_blank" rel="noopener"` : '';
-    const style = i >= 3 ? ' style="display:none"' : '';
-    const displayDate = /^\d{4}-\d{2}-\d{2}/.test(g.date) ? relativeDate(g.date) : g.date;
-    return `<${tag} class="news-item"${href}${style}>
-      <div><span class="news-tag tag-${g.topic}">${g.icon} ${g.label}</span></div>
-      <div class="news-headline">${g.headline}</div>
-      <div class="news-meta">${g.src} · ${displayDate}</div>
+  const geoRows = geoSlice.map(g => {
+    const url = safeURL(g.url);
+    const tag = url ? 'a' : 'div';
+    const href = url ? ` href="${esc(url)}" target="_blank" rel="noopener"` : '';
+    const displayDate = /^\d{4}-\d{2}-\d{2}/.test(g.date) ? relativeDate(g.date) : esc(g.date);
+    return `<${tag} class="news-item"${href}>
+      <div><span class="news-tag tag-${esc(g.topic)}">${esc(g.icon)} ${esc(g.label)}</span></div>
+      <div class="news-headline">${esc(g.headline)}</div>
+      <div class="news-meta">${esc(g.src)} · ${displayDate}</div>
     </${tag}>`;
   }).join('');
-  const geoBtn = geoSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${geoSlice.length})">展開全部 ${geoSlice.length} 筆 ▼</button>` : '';
+  const geoBtn = geoSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this)">展開全部 ${geoSlice.length} 筆 ▼</button>` : '';
 
   const newsSlice = NEWS.slice(0, 5);
-  const topNews = newsSlice.map((n, i) => {
-    const tag = n.url ? 'a' : 'div';
-    const href = n.url ? ` href="${n.url}" target="_blank" rel="noopener"` : '';
-    const style = i >= 3 ? ' style="display:none"' : '';
-    return `<${tag} class="news-item"${href}${style}>
-      <div><span class="news-tag tag-${n.tag}">${n.label}</span></div>
-      <div class="news-headline">${n.title}</div>
-      <div class="news-meta">${n.src} · ${n.time ?? (n.date ? relativeDate(n.date) : '')}</div>
+  const topNews = newsSlice.map(n => {
+    const url = safeURL(n.url);
+    const tag = url ? 'a' : 'div';
+    const href = url ? ` href="${esc(url)}" target="_blank" rel="noopener"` : '';
+    const meta = n.time ?? (n.date ? relativeDate(n.date) : '');
+    return `<${tag} class="news-item"${href}>
+      <div><span class="news-tag tag-${esc(n.tag)}">${esc(n.label)}</span></div>
+      <div class="news-headline">${esc(n.title)}</div>
+      <div class="news-meta">${esc(n.src)} · ${esc(meta)}</div>
     </${tag}>`;
   }).join('');
-  const newsBtn = newsSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${newsSlice.length})">展開全部 ${newsSlice.length} 筆 ▼</button>` : '';
+  const newsBtn = newsSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this)">展開全部 ${newsSlice.length} 筆 ▼</button>` : '';
 
   const fedMtg = FED_DATA.nextMeeting;
   const cutProbColor = fedMtg.cutProb >= 50
@@ -1246,17 +1296,18 @@ function renderOverview() {
 
 function renderNews() {
   const allSlice = NEWS.slice(0, 5);
-  const allNews = allSlice.map((n, i) => {
-    const tag = n.url ? 'a' : 'div';
-    const href = n.url ? ` href="${n.url}" target="_blank" rel="noopener"` : '';
-    const style = i >= 3 ? ' style="display:none"' : '';
-    return `<${tag} class="news-item"${href}${style}>
-      <div><span class="news-tag tag-${n.tag}">${n.label}</span></div>
-      <div class="news-headline">${n.title}</div>
-      <div class="news-meta">${n.src} · ${n.time ?? (n.date ? relativeDate(n.date) : '')}</div>
+  const allNews = allSlice.map(n => {
+    const url = safeURL(n.url);
+    const tag = url ? 'a' : 'div';
+    const href = url ? ` href="${esc(url)}" target="_blank" rel="noopener"` : '';
+    const meta = n.time ?? (n.date ? relativeDate(n.date) : '');
+    return `<${tag} class="news-item"${href}>
+      <div><span class="news-tag tag-${esc(n.tag)}">${esc(n.label)}</span></div>
+      <div class="news-headline">${esc(n.title)}</div>
+      <div class="news-meta">${esc(n.src)} · ${esc(meta)}</div>
     </${tag}>`;
   }).join('');
-  const allNewsBtn = allSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${allSlice.length})">展開全部 ${allSlice.length} 筆 ▼</button>` : '';
+  const allNewsBtn = allSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this)">展開全部 ${allSlice.length} 筆 ▼</button>` : '';
 
   const watchItems = WATCHLIST.map(s => `
     <div class="price-cell">
@@ -1437,7 +1488,7 @@ function renderCycle() {
     </div>`).join('');
 
   // 動態週期分析：依 ML clock 位置 + 實際數據組合描述
-  const cpi = FED_DATA.indicators[0].current, gdp = FED_DATA.indicators[4].current;
+  const cpi = _fedById('cpi')?.current ?? '—', gdp = _fedById('gdp')?.current ?? '—';
   const vix = COMMODITIES.find(c => c.symbol === 'VIX')?.price ?? 18;
   const usIdx = INDICES.find(i => i.symbol === 'SPX'),  twIdx = INDICES.find(i => i.symbol === 'TWSE');
   const phaseLabel = getCyclePhaseLabel();
@@ -1570,21 +1621,21 @@ function renderAI() {
   }).join('');
 
   const frontierSlice = AI_FRONTIER.slice(0, 5);
-  const frontier = frontierSlice.map((f, i) => {
-    const tag = f.url ? 'a' : 'div';
-    const href = f.url ? ` href="${f.url}" target="_blank" rel="noopener"` : '';
-    const style = i >= 3 ? ' style="display:none"' : '';
-    const displayDate = /^\d{4}-\d{2}-\d{2}/.test(f.date) ? relativeDate(f.date) : f.date;
-    return `<${tag} class="frontier-item"${href}${style}>
-      <div class="frontier-logo">${f.logo}</div>
+  const frontier = frontierSlice.map(f => {
+    const url = safeURL(f.url);
+    const tag = url ? 'a' : 'div';
+    const href = url ? ` href="${esc(url)}" target="_blank" rel="noopener"` : '';
+    const displayDate = /^\d{4}-\d{2}-\d{2}/.test(f.date) ? relativeDate(f.date) : esc(f.date);
+    return `<${tag} class="frontier-item"${href}>
+      <div class="frontier-logo">${esc(f.logo)}</div>
       <div class="frontier-content">
-        <div class="frontier-brand">${f.brand}</div>
-        <div class="frontier-headline">${f.headline}</div>
+        <div class="frontier-brand">${esc(f.brand)}</div>
+        <div class="frontier-headline">${esc(f.headline)}</div>
         <div class="frontier-date">${displayDate}</div>
       </div>
     </${tag}>`;
   }).join('');
-  const frontierBtn = frontierSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this, ${frontierSlice.length})">展開全部 ${frontierSlice.length} 筆 ▼</button>` : '';
+  const frontierBtn = frontierSlice.length > 3 ? `<button class="expand-btn" onclick="toggleExpand(this)">展開全部 ${frontierSlice.length} 筆 ▼</button>` : '';
 
   return `
     <div class="section">
@@ -1708,18 +1759,22 @@ function renderGitHubItems(items) {
     el.innerHTML = '<div class="gh-loading">沒有找到資料</div>';
     return;
   }
-  el.innerHTML = items.map((r, i) => `
-    <a class="gh-item" href="${r.html_url}" target="_blank" rel="noopener">
+  el.innerHTML = items.map((r, i) => {
+    const href = safeURL(r.html_url);
+    const stars = (r.stargazers_count ?? 0).toLocaleString();
+    return `
+    <a class="gh-item" href="${esc(href)}" target="_blank" rel="noopener">
       <div class="gh-rank">${i + 1}</div>
       <div class="gh-info">
-        <div class="gh-repo-name">${r.full_name}</div>
-        <div class="gh-desc">${r.description || '（無描述）'}</div>
+        <div class="gh-repo-name">${esc(r.full_name)}</div>
+        <div class="gh-desc">${esc(r.description || '（無描述）')}</div>
         <div class="gh-meta">
-          <span class="gh-stars">⭐ ${r.stargazers_count.toLocaleString()}</span>
-          ${r.language ? `<span class="gh-lang">${r.language}</span>` : ''}
+          <span class="gh-stars">⭐ ${stars}</span>
+          ${r.language ? `<span class="gh-lang">${esc(r.language)}</span>` : ''}
         </div>
       </div>
-    </a>`).join('');
+    </a>`;
+  }).join('');
 }
 
 // ── Tab system ────────────────────────────────────────────────────────────
@@ -1743,6 +1798,7 @@ const TABS = [
 let activeTab = 'overview';
 
 function switchTab(id) {
+  const sameTab = id === activeTab;
   activeTab = id;
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -1753,7 +1809,9 @@ function switchTab(id) {
     panel.classList.add('active');
   }
   document.querySelector(`[data-tab="${id}"]`)?.classList.add('active');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  // Only scroll on real tab switches — refresh() also calls this to re-render the
+  // active tab and the scroll-jump is jarring (and loses user's scroll position).
+  if (!sameTab) window.scrollTo({ top: 0, behavior: 'smooth' });
   if (id === 'discover') loadGitHub();
 }
 
@@ -1773,20 +1831,21 @@ async function refresh() {
   localStorage.removeItem(AI_NEWS_CACHE_KEY);
   localStorage.removeItem(GEO_NEWS_CACHE_KEY);
   localStorage.removeItem(MARKET_NEWS_CACHE_KEY);
+  // Reset live status — otherwise a previously-live source that fails this round
+  // will keep its 'LIVE' label, misleading the user.
+  for (const k of Object.keys(LIVE_SOURCES)) LIVE_SOURCES[k] = false;
   await fetchAndUpdateLiveData();
   switchTab(activeTab);
   btn.classList.remove('spinning');
   updateLiveStatus();
 }
 
-function toggleExpand(btn, total) {
+function toggleExpand(btn) {
   const wrap = btn.previousElementSibling;
   if (!wrap) return;
+  // Visibility is driven by CSS (.expandable.expanded > :nth-child(n+4)).
   const expanded = wrap.classList.toggle('expanded');
-  Array.from(wrap.children).forEach((el, i) => {
-    if (i >= 3) el.style.display = expanded ? '' : 'none';
-  });
-  btn.textContent = expanded ? '收合 ▲' : `展開全部 ${total} 筆 ▼`;
+  btn.textContent = expanded ? '收合 ▲' : `展開全部 ${wrap.children.length} 筆 ▼`;
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────
