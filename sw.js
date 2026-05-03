@@ -1,4 +1,5 @@
 const CACHE_NAME = 'market-radar-v3';
+const DATA_CACHE = 'market-radar-data-v1';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/config.js', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', e => {
@@ -15,24 +16,31 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      Promise.all(
+        keys.filter(k => k !== CACHE_NAME && k !== DATA_CACHE).map(k => caches.delete(k))
+      )
     )
   );
   self.clients.claim();
 });
 
+// Network-first with cache fallback for both shell (same-origin) and external
+// API GETs (Polygon / FRED / RSS / GitHub / Fugle / CORS proxies). Online: live
+// data wins. Offline / network error: serve last-known-good response so the PWA
+// still renders something instead of breaking. Mutating methods are skipped.
 self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  // Only handle same-origin app shell requests. Cross-origin (Polygon, FRED,
-  // RSS feeds, GitHub, Fugle, CORS proxies) goes straight to the network so the
-  // browser handles CORS / rate-limit errors directly without polluting the
-  // console with SW "Failed to fetch" rejections.
-  if (url.origin !== self.location.origin) return;
+  if (e.request.method !== 'GET') return;
+  const sameOrigin = new URL(e.request.url).origin === self.location.origin;
+  const cacheName = sameOrigin ? CACHE_NAME : DATA_CACHE;
   e.respondWith(
     fetch(e.request)
       .then(res => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then(c => c.put(e.request, clone)).catch(() => {});
+        // Only cache successful or opaque responses; skip 4xx/5xx so an error
+        // doesn't overwrite a previously-good cache entry.
+        if (res && (res.ok || res.type === 'opaque')) {
+          const clone = res.clone();
+          caches.open(cacheName).then(c => c.put(e.request, clone)).catch(() => {});
+        }
         return res;
       })
       .catch(() => caches.match(e.request))
