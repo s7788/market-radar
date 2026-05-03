@@ -1,6 +1,18 @@
 const CACHE_NAME = 'market-radar-v3';
 const DATA_CACHE = 'market-radar-data-v1';
+// Cap cross-origin cache so per-symbol Polygon URLs / FRED series / RSS items
+// don't grow the cache without bound. cache.keys() returns Requests in
+// insertion order per spec, so trimming from the head is FIFO eviction.
+const DATA_CACHE_MAX = 80;
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/config.js', '/manifest.json', '/icon.svg'];
+
+async function _trimDataCache() {
+  const c = await caches.open(DATA_CACHE);
+  const keys = await c.keys();
+  const overflow = keys.length - DATA_CACHE_MAX;
+  if (overflow <= 0) return;
+  for (let i = 0; i < overflow; i++) await c.delete(keys[i]);
+}
 
 self.addEventListener('install', e => {
   // best-effort: addAll() is atomic — any 404 (e.g. fork without config.js) would
@@ -39,7 +51,10 @@ self.addEventListener('fetch', e => {
         // doesn't overwrite a previously-good cache entry.
         if (res && (res.ok || res.type === 'opaque')) {
           const clone = res.clone();
-          caches.open(cacheName).then(c => c.put(e.request, clone)).catch(() => {});
+          caches.open(cacheName)
+            .then(c => c.put(e.request, clone))
+            .then(() => sameOrigin ? null : _trimDataCache())
+            .catch(() => {});
         }
         return res;
       })
