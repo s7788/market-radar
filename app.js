@@ -472,7 +472,12 @@ function detectAIBrand(source, title) {
 }
 
 function relativeDate(dateStr) {
-  const diff = Date.now() - new Date(dateStr).getTime();
+  const t = new Date(dateStr).getTime();
+  // Reject NaN (invalid string) and t<=0 (`new Date(null)` returns epoch=0,
+  // which would otherwise display as "56年前" instead of "").
+  if (!Number.isFinite(t) || t <= 0) return '';
+  const diff = Date.now() - t;
+  if (diff < 0) return '剛剛';            // future-dated (clock skew) → treat as now
   const h = Math.floor(diff / 3600000), d = Math.floor(diff / 86400000);
   if (h < 1) return '剛剛';
   if (h < 24) return `${h}小時前`;
@@ -602,7 +607,10 @@ async function fetchMarketNewsFromPolygon() {
     const link = safeURL(a.article_url);
     if (!a.title || !link) continue;
     const cat = categorizeMarketNews(a.title, a.publisher?.name || '');
-    items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.publisher?.name || '', time: relativeDate(a.published_utc), url: link });
+    // Store ISO `date` (not pre-computed `time` string) so the render layer
+    // recomputes "N分鐘前" labels live — otherwise a 20-min-cached payload
+    // would still say "剛剛" 19 minutes after the fetch.
+    items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.publisher?.name || '', date: a.published_utc, url: link });
     if (items.length >= 7) break;
   }
   return items;
@@ -616,7 +624,7 @@ async function fetchMarketNewsFromRSS() {
       for (const a of articles) {
         const cat = categorizeMarketNews(a.title, a.source);
         if (items.some(i => i.title === a.title)) continue;
-        items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.source, time: relativeDate(new Date(a.pubDate).toISOString()), url: a.link });
+        items.push({ tag: cat.tag, label: cat.label, title: a.title, src: a.source, date: new Date(a.pubDate).toISOString(), url: a.link });
         if (items.length >= 7) break;
       }
     } catch (_) {}
@@ -677,7 +685,7 @@ async function fetchGeoNews() {
   }
 }
 
-const MARKET_NEWS_CACHE_KEY = 'market_news_v2';
+const MARKET_NEWS_CACHE_KEY = 'market_news_v3';
 const MARKET_NEWS_CACHE_TTL = 20 * 60 * 1000; // 20 min
 
 function categorizeMarketNews(title, source) {
