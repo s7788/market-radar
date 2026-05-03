@@ -526,6 +526,13 @@ body::after {
 }
 .commodity-change { font-size: .68rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 
+/* ── Expandable lists ────────────────────────────────────────────────── */
+/* Hide items past the first 3 by default; toggleExpand() flips .expanded.
+   Uses :not(.expanded) so the rule disappears entirely when expanded — the
+   element's own display (e.g. .news-item { display: block }) takes over,
+   instead of falling back to UA defaults (an <a> would become inline). */
+.expandable:not(.expanded) > :nth-child(n+4) { display: none; }
+
 /* ── News items ──────────────────────────────────────────────────────── */
 .news-item {
   display: block;

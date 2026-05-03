@@ -2,7 +2,13 @@ const CACHE_NAME = 'market-radar-v3';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/config.js', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(SHELL)));
+  // best-effort: addAll() is atomic — any 404 (e.g. fork without config.js) would
+  // reject the whole install and the SW never activates. Cache each URL separately.
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(c =>
+      Promise.allSettled(SHELL.map(u => c.add(u)))
+    )
+  );
   self.skipWaiting();
 });
 
