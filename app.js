@@ -319,19 +319,26 @@ async function fetchFugleQuote(symbol) {
 // Override via CONFIG.CORS_PROXY to use a single custom proxy exclusively.
 // _proxyOrder is mutated as proxies succeed/fail so a downed proxy doesn't keep
 // costing every subsequent caller a full timeout.
+// Each entry knows how to build its request URL from a raw target. Some
+// proxies want the URL appended verbatim (cors.eu.org), others want it
+// percent-encoded as a query parameter (codetabs).
+//   - cors.eu.org: passes everything through, including FRED + TWSE which
+//     reject most other proxies' datacenter IPs.
+//   - codetabs:    RSS-only fallback (FRED/TWSE block it via WAF).
 const _proxyOrder = [
-  'https://corsproxy.io/?url=',
-  'https://api.allorigins.win/raw?url=',
-  'https://thingproxy.freeboard.io/fetch/',
+  { build: t => 'https://cors.eu.org/' + t },
+  { build: t => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(t) },
 ];
 
 async function proxyFetch(targetUrl, options = {}) {
   const userOverride = (typeof CONFIG !== 'undefined' && CONFIG.CORS_PROXY) ? CONFIG.CORS_PROXY : null;
-  const proxies = userOverride ? [userOverride] : _proxyOrder.slice();
+  const proxies = userOverride
+    ? [{ build: t => userOverride + encodeURIComponent(t) }]
+    : _proxyOrder.slice();
   let lastErr;
   for (const proxy of proxies) {
     try {
-      const res = await fetch(proxy + encodeURIComponent(targetUrl), options);
+      const res = await fetch(proxy.build(targetUrl), options);
       if (res.status === 429 || res.ok) {
         // Promote the working proxy to the head of the rotation so the next
         // caller doesn't repeat earlier failures. Skipped when user overrode.
@@ -352,9 +359,8 @@ async function proxyFetch(targetUrl, options = {}) {
 
 async function fetchFredSingle(seriesId, extraParams = '') {
   const target = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&sort_order=desc&limit=2&file_type=json${extraParams}&api_key=${CONFIG.FRED_API_KEY}`;
-  // FRED supports CORS natively from any browser origin — call directly,
-  // bypassing the proxy (Cloudflare datacenter IPs are often blocked by FRED).
-  const res = await fetch(target, { signal: _withAbort(12000) });
+  // FRED does not send CORS headers, so route through the proxy rotation.
+  const res = await proxyFetch(target, { signal: _withAbort(12000) });
   if (!res.ok) throw new Error(res.status);
   const j = await res.json();
   return (j.observations || []).filter(o => o.value !== '.');
@@ -543,7 +549,7 @@ async function fetchAIFrontierNews() {
   }
 }
 
-// ── RSS Fetcher (free, no API key; uses allorigins.win proxy for CORS) ────
+// ── RSS Fetcher (free, no API key; uses cors.eu.org proxy for CORS) ──────
 async function fetchRSSItems(rssUrl, sourceName) {
   const res = await proxyFetch(rssUrl, { signal: _withAbort(10000) });
   if (!res.ok) throw new Error(res.status);
