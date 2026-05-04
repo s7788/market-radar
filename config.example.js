@@ -38,8 +38,9 @@ const CONFIG = {
 
   // ── CORS Proxy ────────────────────────────────────────────────────────────
   // FRED 和 RSS feeds 在 deployed origin 上有 CORS 限制，需透過 proxy 轉發。
-  // 預設為 corsproxy.io（免設定）。若有自架 proxy 或其他端點，在此覆寫。
-  // CORS_PROXY: 'https://corsproxy.io/?url=',
+  // 預設使用 cors.eu.org（免設定）。若有自架 proxy 或其他端點，在此覆寫。
+  // 覆寫值需可直接接 URL（編碼後）如 'https://my-proxy.example.com/?url='
+  // CORS_PROXY: 'https://my-proxy.example.com/?url=',
 
   // ── 部署版本（CI 自動覆寫，本地開發用 'dev'）────────────────────────────
   BUILD_VERSION: 'dev',
